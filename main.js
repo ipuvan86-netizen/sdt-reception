@@ -1466,6 +1466,14 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
     // HPOS and retry this patient. Rung 2: full fresh login (recoverLogin),
     // re-enter, retry. Three consecutive unhealed failures stop the run
     // cleanly instead of burning the rest of the list.
+    // A reply that is the search form itself means the CDBS form never
+    // really submitted - caught HERE (before the rungs) since 2026-08-08.4,
+    // so the re-enter-HPOS heal below fires instead of three instant
+    // strikes aborting the run (the 20:15 desk-run failure).
+    if (res && res.ok && /known only by one name|date of birth\s*dd\/mm\/yyyy/i.test(res.text || '')) {
+      res.ok = false; res.reason = 'form-boilerplate'; res.text = '';
+      runlog('  the reply was the search form itself - re-opening the CDBS form and retrying this patient');
+    }
     if (res && res.ok) global.__lastOkReplyAt = Date.now();
     const sessionLooksAlive = (Date.now() - (global.__lastOkReplyAt || 0)) < 90 * 1000;
     if (!res.ok && res.reason === 'nothing-returned' && sessionLooksAlive) {
@@ -3374,7 +3382,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.3';
+const APP_BUILD = '2026-08-08.4';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3944,8 +3952,12 @@ ipcMain.handle('worker-set', (e, p) => {
 });
 
 function engineBusy() {
+  // autoRunning / autoRunAllBusy included since 2026-08-08.4: the note
+  // worker was writing patient notes in the SAME Principle window while
+  // an auto report was running, navigating it away mid-download.
   return !!(runAllState.running || runState.running || collectState.running ||
-            balanceState.running || genState.running || morningState.running);
+            balanceState.running || genState.running || morningState.running ||
+            autoRunning || autoRunAllBusy);
 }
 
 ipcMain.handle('cloud-health', () => ({ ok: fsHealth.ok, error: fsHealth.lastError }));
