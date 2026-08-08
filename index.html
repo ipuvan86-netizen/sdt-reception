@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>SDT Admin — CDBS Balance Notes</title>
+<style>
+  :root { --accent: #2F6B4F; --bg: #f5f5f7; --ink: #1d1d1f; --muted: #6e6e73; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+         background: var(--bg); color: var(--ink); margin: 0; -webkit-font-smoothing: antialiased; }
+  header { padding: 34px 26px 6px; max-width: 760px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; margin: 0; flex: 1; }
+  #loginStatus { font-size: 13px; color: var(--muted); }
+  main { max-width: 760px; margin: 0 auto; padding: 10px 26px 60px; }
+  .card { background: #fff; border: none; border-radius: 18px; padding: 24px;
+          margin-top: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05); }
+  .card h2, .cardTitle { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -0.3px; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .muted { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  button { font: inherit; border: none; border-radius: 980px; padding: 10px 20px; cursor: pointer;
+           font-weight: 600; font-size: 14px; transition: transform .06s ease, opacity .15s; }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: default; }
+  .primary { background: var(--accent); color: #fff; }
+  .primary:hover:not(:disabled) { background: #275c43; }
+  .secondary { background: #ececf0; color: var(--ink); }
+  .secondary:hover:not(:disabled) { background: #e2e2e8; }
+  input[type=text], input[type=password] { font: inherit; border: 1px solid #d2d2d7; border-radius: 12px;
+           padding: 10px 14px; background: #fff; outline: none; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,107,79,.15); }
+  .pill { display: inline-block; border-radius: 980px; padding: 6px 14px; font-size: 13px; font-weight: 600; }
+  .pending { background: #f0f0f3; color: var(--muted); animation: pulse 1.4s ease-in-out infinite; }
+  .good { background: #e6f4ec; color: #1d7a46; }
+  .bad { background: #fdecec; color: #c0392b; }
+  .warnpill { background: #fff4e0; color: #9a6b00; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+  details#advancedTools { margin-top: 6px; }
+  details#advancedTools > summary { list-style: none; cursor: pointer; display: inline-block;
+           background: #ececf0; border-radius: 980px; padding: 9px 18px; font-weight: 600; font-size: 13.5px; color: var(--ink); }
+  details#advancedTools > summary::-webkit-details-marker { display: none; }
+  details#advancedTools[open] > summary { background: var(--accent); color: #fff; }
+  .bar { height: 6px; background: #ececf0; border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); width: 0%; transition: width .3s; }
+  .hidden { display: none !important; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid #e5e5ea; }
+  td { padding: 8px 10px; border-bottom: 1px solid #f0f0f3; }
+  .info { background: #f5faf7; border-radius: 12px; padding: 14px 16px; font-size: 13.5px; line-height: 1.55; }
+  .warn { background: #fff8f0; border-radius: 12px; padding: 14px 16px; font-size: 13.5px; }
+  .shell { display: flex; max-width: 1020px; margin: 0 auto; gap: 8px; align-items: flex-start; }
+  aside.nav { width: 185px; flex-shrink: 0; padding: 10px 0 0 18px; position: sticky; top: 0; }
+  .navitem { display: block; padding: 10px 16px; border-radius: 12px; font-weight: 600; font-size: 14px;
+             color: var(--ink); cursor: pointer; margin-bottom: 4px; }
+  .navitem:hover { background: #ececf0; }
+  .navitem.active { background: var(--accent); color: #fff; }
+  .chip { display: inline-block; background: #ececf0; border-radius: 99px; padding: 2px 10px; font-size: 11px; font-weight: 600; margin-left: 6px; }
+  .due-over { color: #c0392b; font-weight: 600; }
+  section.dept { border-bottom: 1px solid #f0f0f3; padding: 6px 0; }
+  section.dept > summary, details.dept > summary { cursor: pointer; font-weight: 650; font-size: 15px; padding: 8px 0; list-style: none; }
+  details.dept > summary::-webkit-details-marker { display: none; }
+  details.dept > summary .ci::before { content: '+'; }
+  details.dept[open] > summary .ci::before { content: '−'; }
+
+.engbusy .engbtn, .engbusy button[data-rw], .engbusy [data-runjob],
+.engbusy #btnCdbsBatch, .engbusy #btnCdbsAll, .engbusy #btnRunFile,
+.engbusy #btnRunAll, .engbusy #btnMorningNow, .engbusy #btnCheckOne {
+  opacity:.35; pointer-events:none;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>SDT Reception</h1>
+  <span id="lightPrinciple" class="pill pending">Principle</span>
+  <span id="lightProda" class="pill pending">PRODA</span>
+  <span class="pill" style="background:#eef2f7; color:#8a94a6; font-weight:500;" title="App build number">build 2026-08-07.25</span>
+  <button class="secondary" id="btnLogReport" title="Everything the app did in the last 5 days, in one file" style="padding:7px 14px; font-size:12px;">Log report</button>
+  <button class="secondary" id="btnDiag" title="Tools for looking inside the machinery" style="padding:7px 14px; font-size:12px;">Diagnostics</button>
+  </div>
+  <div class="row">
+    <span id="loginPill" class="pill checking" style="padding:6px 12px; font-size:12px;">Checking Principle...</span>
+    <button class="primary hidden" id="btnLogin">Log in to Principle</button>
+  </div>
+<div id="diagPanel" class="hidden" style="position:absolute; right:26px; top:64px; z-index:60; background:#fff; border-radius:16px; box-shadow:0 8px 30px rgba(0,0,0,.14); padding:16px 18px; width:330px;">
+  <div class="cardTitle" style="font-size:15px;">Diagnostics</div>
+  <div id="diagVitals" class="muted" style="margin:8px 0 10px;">…</div>
+  <div class="muted" style="font-weight:600; margin-top:6px;">Peek at a window</div>
+  <div class="row" style="margin-top:6px;">
+    <button class="secondary" data-dw="principle:show" style="padding:5px 10px; font-size:12px;">Principle</button>
+    <button class="secondary" data-dw="report:show" style="padding:5px 10px; font-size:12px;">Report</button>
+    <button class="secondary" data-dw="proda:show" style="padding:5px 10px; font-size:12px;">PRODA</button>
+    <button class="secondary" data-dw="principle:hide" title="Hide all peeked windows" style="padding:5px 10px; font-size:12px;">Hide</button>
+  </div>
+  <div class="muted" style="font-weight:600; margin-top:12px;">Capture for Claude → Downloads</div>
+  <div class="row" style="margin-top:6px;">
+    <button class="secondary" data-dc="principle" style="padding:5px 10px; font-size:12px;">Principle</button>
+    <button class="secondary" data-dc="report" style="padding:5px 10px; font-size:12px;">Report</button>
+    <button class="secondary" data-dc="proda" style="padding:5px 10px; font-size:12px;">PRODA</button>
+  </div>
+  <div class="muted" style="font-weight:600; margin-top:12px;">Record clicks (network) → Downloads</div>
+  <div class="row" style="margin-top:6px;">
+    <button class="secondary" id="btnRecStart" style="padding:5px 10px; font-size:12px;">● Start recording</button>
+    <button class="secondary" id="btnRecStop" style="padding:5px 10px; font-size:12px;">■ Stop &amp; save</button>
+  </div>
+  <div class="row" style="margin-top:12px;">
+    <button class="secondary" id="btnRunLogDiag" style="padding:5px 10px; font-size:12px;">Last run log</button>
+    <button class="secondary" id="btnReportsFolderDiag" style="padding:5px 10px; font-size:12px;">Reports folder</button>
+  </div>
+  <div id="diagState" class="muted" style="margin-top:10px;"></div>
+</div>
+</header>
+
+<div class="shell">
+<aside class="nav">
+  <div class="navitem active" id="navHome">Home</div>
+  <div class="navitem" id="navReact">Reactivation Health funds/DVA</div>
+  <div class="navitem" id="navReactCdbs">Reactivation CDBS</div>
+  <div class="navitem" id="navAuto">Auto Reports</div>
+  <div class="navitem" id="navCdbs">CDBS / Medicare</div>
+  <div id="workerBadge" class="muted" style="margin-top:14px; font-size:11.5px; padding:0 14px; display:none;">Viewer — daily schedules off</div>
+</aside>
+<main style="max-width:none; flex:1; padding:10px 26px 60px 8px;">
+
+  <!-- RUN THE LOT -->
+  <div class="hidden" id="codeBar" style="position:fixed; inset:0; background:rgba(29,29,31,.45); z-index:999; display:flex; align-items:center; justify-content:center; backdrop-filter: blur(3px);">
+    <div class="card" style="max-width:420px; margin:0; border:2px solid #e2a93b;">
+      <div class="cardTitle">PRODA needs the 6-digit code</div>
+      <div class="muted" style="margin-top:6px;">From your PRODA code app or SMS — type it here, or reply on Telegram; whichever arrives first works.</div>
+      <div class="row" style="margin-top:14px;">
+        <input type="text" id="codeInput" placeholder="6 digits" style="flex:1; font-size:22px; letter-spacing:4px; text-align:center;">
+        <button class="primary" id="btnSupplyCode">Enter</button>
+      </div>
+      <div id="codeBarState" class="muted" style="margin-top:8px;"></div>
+      <div style="margin-top:10px; text-align:right;"><button class="secondary" id="btnCodeCancel" style="font-size:12px; padding:6px 14px;">Cancel this run</button></div>
+    </div>
+  </div>
+
+
+<div id="viewHome">
+  <div class="card hidden" id="cardErrors" style="border-left: 4px solid #c0392b; padding:14px 20px;">
+    <div style="font-weight:700; font-size:15px; color:#c0392b;">⚠ Needs attention</div>
+    <div id="errList" class="muted" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card" id="cardActions" style="border-left:5px solid transparent; transition: border-color .3s;">
+    <div class="row">
+      <div class="cardTitle" style="flex:1;">Action list</div>
+      <span id="actionCount" class="pill pending">…</span>
+      <button class="secondary" id="btnRoutineAdd" title="Add a routine task (steriliser log, stock count…)" style="padding:5px 13px; font-size:16px; font-weight:600; border-radius:99px;">＋</button>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <span class="muted">Work this list from home:</span>
+      <a href="#" id="lnkStaffPage" style="font-weight:600; color:var(--accent); text-decoration:none;">inv-c20f7.web.app</a>
+      <button class="secondary" id="btnCopyLink" title="Copy the link to send to staff" style="padding:6px 14px;">⧉ Copy link</button>
+      <span id="shareState" class="muted"></span>
+      <details style="margin-left:auto;"><summary class="muted" style="cursor:pointer; font-size:12px;">page file…</summary>
+        <button class="secondary" id="btnShareCopy" style="padding:6px 14px; margin-top:6px;">Copy page HTML</button>
+        <button class="secondary" id="btnShareSave" style="padding:6px 14px; margin-top:6px;">Save as file…</button>
+      </details>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <span class="muted">Show:</span><select id="fAssign" style="font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:6px;"><option value="">Everyone</option></select>
+    </div>
+    <div class="row hidden" id="routineForm" style="margin-top:10px; background:#f4f4f8; border-radius:12px; padding:10px;">
+      <input type="text" id="rName" placeholder="Routine task… (e.g. Steriliser log)" style="flex:2; min-width:170px;">
+      <select id="rFreq" style="font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:8px;">
+        <option value="daily">Daily</option><option value="weekly" selected>Weekly</option>
+        <option value="fortnightly">Fortnightly</option><option value="monthly">Monthly</option>
+        <option value="sixmonthly">6-monthly</option><option value="yearly">Yearly</option>
+        <option value="once">Once (pick date)</option>
+      </select>
+      <input type="text" id="rHow" placeholder="How-to link (optional)" style="flex:1; min-width:150px;">
+      <input type="date" id="rDate" title="Due / first due date" style="font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:7px;">
+      <button class="primary" id="btnRoutineSave">Add</button>
+      <span id="routineState" class="muted" style="flex-basis:100%;"></span>
+    </div>
+    <div id="actionItems" style="margin-top:12px;"></div>
+
+  </div>
+
+  <div class="card" id="cardStatus" style="padding:14px 20px;">
+    <div id="runStrip" class="muted">No runs yet this session.</div>
+  </div>
+  <div style="height:14px;"></div>
+</div>
+
+<div id="viewReact" class="hidden">
+  <div class="card">
+    <div class="row">
+      <div class="cardTitle">Reactivation Health funds/DVA</div>
+      <input type="text" id="reactSearch" placeholder="Search any patient — incl. already called…" style="margin-left:auto; width:280px;">
+    </div>
+    <div class="muted" style="margin-top:4px;">Ring, pick the outcome, note it. "Send to Principle" writes and pins the note in their file — otherwise it stays here. Rung patients stay off this list for 180 days.</div>
+    <div id="reactList" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<div id="viewReactCdbs" class="hidden">
+  <div class="card">
+    <div class="row">
+      <div class="cardTitle">Reactivation CDBS — under 18</div>
+      <select id="cdbsSort" style="margin-left:auto; font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;">
+        <option value="name">Sort: name A–Z</option>
+        <option value="balance">Sort: highest balance first</option>
+      </select>
+      <input type="text" id="reactCdbsSearch" placeholder="Search any patient — incl. already called…" style="width:260px;">
+    </div>
+    <div class="row" style="margin-top:12px; background:#f0f6f3; border-radius:12px; padding:12px;">
+      <button class="primary" id="btnCdbsBatch" style="font-size:14px;">Check first 20 CDBS balances</button>
+      <button class="secondary" id="btnCdbsAll">Check everyone on this list</button>
+      <button class="secondary" id="btnCdbsNotElig">Re-check all ineligible patients</button>
+      <span id="cdbsCheckState" class="muted"></span>
+    </div>
+    <div class="muted" style="margin-top:6px;">Press the green button before a calling session — it refreshes balances for the first 20 patients not yet checked today (one PRODA code, ~15 min). Balances show on each card with the date checked.</div>
+    <div id="reactCdbsList" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<div id="viewAuto" class="hidden">
+    <div id="histPanel" style="display:none; position:fixed; top:8vh; left:50%; transform:translateX(-50%); width:min(680px, 92vw); max-height:80vh; overflow:auto; background:#fff; border:1px solid #d2d2d7; border-radius:16px; box-shadow:0 18px 60px rgba(0,0,0,.25); padding:18px; z-index:6000;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <strong style="font-size:16px; flex:1;">Run history — last 20 days</strong>
+        <button class="secondary" id="btnHistClose" style="padding:6px 14px;">Close</button>
+      </div>
+      <div id="histBody"></div>
+    </div>
+  <div class="card">
+    <div class="cardTitle">Auto Reports</div>
+    <div class="row" style="margin-top:12px; background:#eaf3ee; border:2px solid #2F6B4F; border-radius:14px; padding:14px;">
+      <button class="primary" id="btnRunAllJobs" style="font-size:16px; padding:12px 26px;">▶ RUN ALL</button>
+      <label style="font-size:12.5px; white-space:nowrap;"><input type="checkbox" id="runAllSchedOn"> every day at</label>
+      <input type="text" id="runAllTime" value="08:30" style="width:64px; text-align:center; font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;">
+      <button class="secondary" id="btnRunAllSchedSave" style="padding:6px 14px;">Save</button>
+      <button class="secondary" id="btnRunHistory" style="padding:6px 14px;">History</button>
+      <div style="flex:1; font-size:12.5px; color:#3c3c43;">The whole morning as one run: every report with its toggle <strong>ON</strong>, in order, finishing with the 14-day CDBS morning run (desk mode). Per-report times are retired — this one clock (or the button) is the schedule; the toggles decide what is in it. A one-page summary lands on Telegram when it finishes. <strong>The PRODA code is asked for straight away</strong> — type it into the box here <em>or</em> reply on Telegram, whichever is quicker — so nothing waits later. Nothing double-sends: every job remembers what it has already done.</div>
+    </div>
+    <div class="muted" style="margin-top:6px;">Background jobs that run a Principle report on a schedule and feed the Action list. No PRODA involved — a PRODA problem can never stop these.</div>
+    <div id="autoTable" style="margin-top:14px;"></div>
+  </div>
+
+  <div class="card" id="cardRunAll" style="border-color: var(--accent); border-width: 2px;">
+    <div class="row">
+      <div>
+        <div class="cardTitle">Morning run — progress &amp; review table</div>
+        <div class="muted" style="margin-top:6px;">
+          The live window for the 14-day CDBS morning run. Start it from the row above
+          (Run now) or let the daily RUN ALL clock fire it — progress appears here, the
+          review table opens here when balances finish, and <strong>nothing is written</strong>
+          until "Write these notes" is pressed.
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="secondary hidden" id="btnStopAll">Stop</button>
+      <button class="primary hidden" id="btnRunAll">CDBS check</button>
+    </div>
+    <div id="runAllWrap" class="hidden" style="margin-top:16px;">
+      <div class="muted" id="runAllText"></div>
+    </div>
+    <div id="runAllResult" class="hidden" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- DIAGNOSTIC -->
+  <!-- STEP 1b: COLLECT MEDICARE DETAILS -->
+  <div class="card hidden" id="stepCollect">
+    <div class="row">
+      <div>
+        <div style="font-weight:600; font-size:16px;">Optional: collect Medicare details first</div>
+        <div class="muted" style="margin-top:4px;">
+          Reads each patient's Medicare number, sub numerate, expiry and date of birth from
+          Principle, and saves a new spreadsheet with those columns added — so the PRODA
+          checks can be done from one list. Nothing is written to any patient file.
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="secondary hidden" id="btnStopCollect">Stop</button>
+      <button class="primary" id="btnCollect">Collect details</button>
+    </div>
+    <div id="collectWrap" class="hidden" style="margin-top:16px;">
+      <div class="bar"><div id="collectBar"></div></div>
+      <div class="muted" id="collectText" style="margin-top:8px;"></div>
+    </div>
+    <div id="collectResult" class="hidden" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- STEP 1c: CHECK BALANCES IN PRODA -->
+  <div class="card hidden" id="stepBalances">
+    <div class="row">
+      <div>
+        <div style="font-weight:600; font-size:16px;">Check the balances in PRODA</div>
+        <div class="muted" style="margin-top:4px;">
+          Log into PRODA and stop there — the app does the rest. It goes into HPOS,
+          opens the Child Dental Benefits Schedule, and checks each patient, recording
+          PRODA's answer word for word.
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="secondary hidden" id="btnStopBalances">Stop</button>
+      <button class="primary" id="btnBalances">Check balances</button>
+    </div>
+    <div id="balanceWrap" class="hidden" style="margin-top:16px;">
+      <div class="bar"><div id="balanceBar"></div></div>
+      <div class="muted" id="balanceText" style="margin-top:8px;"></div>
+    </div>
+    <div id="balanceResult" class="hidden" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div id="stepPreview" class="hidden">
+    <div id="warnings"></div>
+    <div class="card">
+      <div class="row" style="margin-bottom:16px;">
+        <div>
+          <div style="font-weight:600; font-size:16px;">2. Check before anything is written</div>
+          <div class="muted" id="previewSummary" style="margin-top:4px;"></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="secondary hidden" id="btnStop">Stop</button>
+        <button class="primary" id="btnRun">Write these notes</button>
+      </div>
+
+      <div id="progressWrap" class="hidden" style="margin-bottom:16px;">
+        <div class="bar"><div id="progressBar"></div></div>
+        <div class="muted" id="progressText" style="margin-top:8px;"></div>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:52px;">Row</th>
+              <th style="width:180px;">Patient</th>
+              <th style="width:105px;">Appointment</th>
+              <th style="width:110px;">Balance</th>
+              <th>Note that will be written</th>
+              <th style="width:130px;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="card hidden" id="stepDone">
+    <div style="font-weight:600; font-size:16px; margin-bottom:10px;">Finished</div>
+    <div class="info" id="doneSummary"></div>
+    <div class="row" style="margin-top:16px;">
+      <button class="secondary" id="btnResults">Open results file</button>
+      <button class="secondary" id="btnAgain">Start another</button>
+    </div>
+  </div>
+</div>
+
+<div id="viewCdbs" class="hidden">
+  <details id="advancedTools">
+    <summary>Advanced tools</summary>
+  <div class="card" id="cardMorning">
+    <div style="font-weight:600; font-size:16px;">Morning run (automatic)</div>
+    <div class="muted" style="margin-top:4px;">
+      Weekday mornings the app generates the report and reads Medicare details by itself,
+      then messages your phone on Telegram and <strong>waits for your YES</strong> before
+      touching PRODA. On YES it signs in (the code goes to your phone), checks the balances,
+      and messages a summary — <strong>counts only, never patient names</strong>. Notes are
+      written only from the desk, or by replying WRITE.<br><br>
+      The PRODA username, password, and bot token are stored <strong>encrypted on this PC
+      only</strong> (Windows encryption, tied to this computer and Windows account). They are
+      never sent anywhere; the only secret that ever crosses Telegram is the 6-digit code.
+      Saved fields show as "saved" — leave a box empty to keep what's stored.
+    </div>
+    <div class="row" style="margin-top:14px; gap:10px; flex-wrap:wrap;">
+      <div style="width:100%; font-size:12.5px; color:#3c3c43; background:#eaf3ee; border-radius:10px; padding:9px 12px; margin-bottom:4px;"><strong>App cloud sign-in</strong> — the account this app uses for the shared lists (ask Immanuel for the password). Press Test after saving.</div>
+      <input type="text" id="mFbEmail" placeholder="app account email" value="desktop@sdtoowoomba.com.au" style="flex:1; min-width:200px;">
+      <input type="password" id="mFbPass" placeholder="app account password" style="flex:1; min-width:180px;">
+      <button class="secondary" id="btnFbTest" style="padding:8px 16px;">Test sign-in</button>
+      <div style="width:100%; height:2px;"></div>
+      <input type="text" id="mUsername" placeholder="PRODA username" style="flex:1; min-width:180px;">
+      <input type="password" id="mPassword" placeholder="PRODA password" style="flex:1; min-width:180px;">
+    </div>
+    <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap;">
+      <input type="password" id="mToken" placeholder="Telegram bot token" style="flex:2; min-width:240px;">
+      <input type="text" id="mChatId" placeholder="Chat ID (found automatically)" style="flex:1; min-width:140px;">
+    </div>
+    <div class="row" style="margin-top:12px; gap:10px; align-items:center; flex-wrap:wrap;">
+      <label style="display:flex; align-items:center; gap:6px;">
+        <input type="checkbox" id="mWorkerBox" style="accent-color:#2F6B4F;"> <strong>This computer runs the daily schedule</strong> (morning ask, auto reports, 6pm debrief). Turn OFF on extra computers — they stay full viewers, and everything manual still works.
+      </label>
+      <label class="row" style="margin-top:8px;">
+        <input type="checkbox" id="mEnabled"> Run automatically on weekday mornings
+      </label>
+      <div class="spacer"></div>
+      <button class="secondary" id="btnMorningTest">Test Telegram</button>
+      <button class="secondary" id="btnMorningNow">Run the morning routine now</button>
+      <input type="password" id="mCellcast" placeholder="Cellcast API key (for birthday texts)" style="flex:1; min-width:200px;">
+      <input type="text" id="mPEmail" placeholder="Principle email (for auto login)" style="flex:1; min-width:180px;">
+      <input type="password" id="mPPassword" placeholder="Principle password" style="flex:1; min-width:150px;">
+      <select id="mTimeH" title="Hour of the morning ask" style="font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;"><option value="00">00</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08" selected>08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option></select>
+      <span style="font-weight:700;">:</span>
+      <select id="mTimeM" title="Minute" style="font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;"><option value="00">00</option><option value="05">05</option><option value="10">10</option><option value="15">15</option><option value="20">20</option><option value="25">25</option><option value="30" selected>30</option><option value="35">35</option><option value="40">40</option><option value="45">45</option><option value="50">50</option><option value="55">55</option></select>
+      <span class="muted" style="margin-left:16px;">Days:</span>
+      <label><input type="checkbox" id="mD1" checked> Mon</label>
+      <label><input type="checkbox" id="mD2" checked> Tue</label>
+      <label><input type="checkbox" id="mD3" checked> Wed</label>
+      <label><input type="checkbox" id="mD4" checked> Thu</label>
+      <label><input type="checkbox" id="mD5" checked> Fri</label>
+      <label><input type="checkbox" id="mD6"> Sat</label>
+      <label><input type="checkbox" id="mD0"> Sun</label>
+      <button class="primary" id="btnMorningSave">Save settings</button>
+    </div>
+    <div id="morningState" class="muted" style="margin-top:12px;"></div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <div style="flex:1;">
+        <div class="cardTitle" style="font-size:16px;">Generate the report only</div>
+        <div class="muted" style="margin-top:4px;">Runs the fortnight report in Principle and loads it for the step-by-step tools, without checking anything.</div>
+      </div>
+      <button class="secondary" id="btnRunLog">Open last run log</button>
+      <button class="secondary" id="btnGenerate">Generate the report</button>
+    </div>
+    <div id="genState" class="muted hidden" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card" id="cardFields">
+    <div class="row">
+      <div>
+        <div style="font-weight:600; font-size:16px;">What does Principle store about a patient?</div>
+        <div class="muted" style="margin-top:4px;">
+          Checks whether Medicare details are available from Principle's search,
+          which would save opening every patient's file. Shows field names only —
+          no patient information is displayed or saved.
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="secondary" id="btnFields">Check</button>
+    </div>
+    <div id="fieldsResult" class="hidden" style="margin-top:16px;"></div>
+
+    <hr style="border:none; border-top:1px solid #f1f5f9; margin:20px 0;">
+
+    <div class="row">
+      <div>
+        <div style="font-weight:600; font-size:16px;">Look at the Medicare tab</div>
+        <div class="muted" style="margin-top:4px;">
+          Opens one patient's file and writes down where the Medicare fields sit.
+          Records labels and the <em>shape</em> of each value only ("10 digits"),
+          never the numbers themselves.
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="secondary" id="btnMedicare">Look</button>
+    </div>
+    <div class="muted" style="margin-top:10px;">
+      Load a report above first, then this uses the first patient in it.
+    </div>
+    <div id="medicareResult" class="hidden" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- PRINCIPLE REPORT CAPTURE -->
+  <div class="card" id="cardReportCapture">
+    <div class="row">
+      <div>
+        <div style="font-weight:600; font-size:16px;">Principle — record how the custom report works</div>
+        <div class="muted" style="margin-top:4px;">
+          For a later step: letting the app generate the report itself instead of you
+          exporting it. Watching only — nothing is clicked or downloaded for you, and
+          all numbers are saved as #.
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:16px;">
+      <div style="font-weight:600; font-size:14px; margin-bottom:8px;">How to do it</div>
+      <ol class="muted" style="margin:0 0 14px 18px; padding:0; line-height:1.7;">
+        <li>Press <strong>Start recording</strong> — Principle opens with a
+            <strong>Recording</strong> menu at the top of that window. Everything below
+            is done from there, so you never have to come back to this window.</li>
+        <li>Go to your custom report, the one you normally export.</li>
+        <li>Open the <strong>Predefined Dates</strong> dropdown and use
+            <strong>Recording → Mark this screen</strong> (or Ctrl+M) while the options are
+            showing — that tells Claude whether "next two weeks" already exists.</li>
+        <li>Set the dates and press <strong>Run Report</strong>, exactly as you would normally.</li>
+        <li>Wait for the CSV to finish downloading, then mark the screen again (Ctrl+M).</li>
+        <li><strong>Recording → Stop and save</strong>, then send Claude the file.</li>
+      </ol>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <button class="primary" id="btnReportStart">Start recording</button>
+        <button class="secondary" id="btnReportMark" disabled>Mark this screen</button>
+        <button class="secondary" id="btnReportStop" disabled>Stop and save</button>
+        <span id="reportState" class="muted"></span>
+      </div>
+    </div>
+
+    <div id="reportResult" class="hidden" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- PRODA CAPTURE -->
+  <div class="card" id="cardProda">
+    <div class="row">
+      <div>
+        <div style="font-weight:600; font-size:16px;">PRODA — record how a balance check works</div>
+        <div class="muted" style="margin-top:4px;">
+          You log in and do the check yourself. This only watches, so it can learn the screens.
+          All numbers are recorded as # and nothing is submitted or automated.
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="secondary" id="btnProdaOpen">Open PRODA</button>
+    </div>
+
+    <div style="margin-top:16px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:16px;">
+      <div style="font-weight:600; font-size:14px; margin-bottom:8px;">How to do it</div>
+      <ol class="muted" style="margin:0 0 14px 18px; padding:0; line-height:1.7;">
+        <li>Press <strong>Open PRODA</strong> and log in as normal.</li>
+        <li>When you're logged in and looking at the main screen, press <strong>Start recording</strong>.
+            A <strong>Recording</strong> menu appears at the top of the PRODA window — use that from here on.</li>
+        <li>Click through to the CDBS balance section and do <strong>one</strong> check on a practice patient.</li>
+        <li>Use <strong>Recording → Mark this screen</strong> (or Ctrl+M) whenever something important is showing — especially the result.</li>
+        <li><strong>Recording → Stop and save</strong>, then send Claude the file.</li>
+      </ol>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <button class="primary" id="btnProdaStart">Start recording</button>
+        <button class="secondary" id="btnProdaMark" disabled>Mark this screen</button>
+        <button class="secondary" id="btnProdaStop" disabled>Stop and save</button>
+        <span id="prodaState" class="muted"></span>
+      </div>
+    </div>
+
+    <div id="prodaResult" class="hidden" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- STEP 1 -->
+  </details>
+
+
+  <div class="card" id="cardCheckOne">
+    <div class="cardTitle">Check CDBS balance</div>
+    <div class="muted" style="margin-top:6px;">
+      A quick balance lookup — for when a parent is on the phone. Type the details from the
+      Medicare card exactly as PRODA wants them. Shows the balance only; nothing is written
+      to any file.
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <input type="text" id="cCard" placeholder="Medicare card number" style="flex:2; min-width:170px;">
+      <input type="text" id="cIrn" placeholder="IRN" style="width:70px;">
+      <input type="text" id="cFirst" placeholder="First name" style="flex:1; min-width:120px;">
+      <button class="primary" id="btnCheckOne">Check</button>
+    </div>
+    <div id="checkOneState" style="margin-top:12px;"></div>
+    <div id="checkOneResult" class="muted" style="margin-top:6px;"></div>
+  </div>
+
+  <div class="card" id="cardFinder">
+    <div class="cardTitle">Find a Medicare number</div>
+    <div class="muted" style="margin-top:6px;">
+      For when the card details are missing or wrong. Searches PRODA's Find a patient by
+      name and date of birth. Searches carry the HPOS patient-consent declaration — for
+      patients of the practice only.
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <input type="text" id="fFirst" placeholder="First name" style="flex:1; min-width:110px;">
+      <input type="text" id="fSur" placeholder="Surname" style="flex:1; min-width:110px;">
+      <input type="text" id="fDob" placeholder="DOB dd/mm/yyyy" style="width:140px;">
+      <button class="primary" id="btnFindOne">Find</button>
+    </div>
+    <div id="findOneState" style="margin-top:12px;"></div>
+    <div id="findOneResult" style="margin-top:6px;"></div>
+    <div class="muted" style="margin-top:16px; border-top:1px solid #f0f0f3; padding-top:14px;">
+      <strong>Or a whole list at once:</strong> CSV with a <strong>Patient Name</strong> column
+      (required), a <strong>link</strong> column (recommended — ties results to the file and
+      lets missing DOBs be fetched from Principle), and a <strong>Date of birth</strong> column
+      (optional). Extra columns are ignored. Out comes a found-numbers CSV.
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="secondary" id="btnPickFind">Upload file</button>
+      <button class="primary" id="btnFindFile">Find multiple patient Medicare numbers</button>
+      <span id="findFileState"></span>
+    </div>
+    <div id="findPreflight" class="muted" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card" id="stepUpload">
+    <div class="row">
+      <div style="flex:1; min-width: 260px;">
+        <div class="cardTitle">Check multiple patients at once</div>
+        <div class="muted" style="margin-top:6px;">
+          The same check as the 14 Day one, but on a file you choose — any date range, any
+          cohort. Use the <strong>Under 18 CDBS inactive to reactivate</strong> report in
+          Principle, or feed it any CSV with these columns (extras are ignored):<br>
+          &nbsp;&nbsp;• <strong>Patient Name</strong><br>
+          &nbsp;&nbsp;• <strong>Patient Date Of Birth</strong><br>
+          &nbsp;&nbsp;• <strong>Patient Link</strong> — the patient's Principle link<br>
+          Save as <strong>CSV UTF-8</strong> in Excel (File &gt; Save As). Each patient is looked
+          up in Principle and checked in PRODA; notes are prepared for the review table
+          (never written without you), and a <strong>call-list CSV</strong> comes out sorted
+          biggest balance first.
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <button class="secondary" id="btnPick">Choose file</button>
+      <button class="primary" id="btnRunFile">Run everything on this file</button>
+      <span id="fileRunState"></span>
+    </div>
+    <div id="fileInfo" class="muted hidden" style="margin-top:14px;"></div>
+  </div>
+
+
+  <!-- MORNING RUN -->
+
+</div>
+</main>
+
+<script src="renderer.js"></script>
+</body>
+</html>

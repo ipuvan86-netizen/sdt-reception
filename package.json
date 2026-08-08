@@ -1,0 +1,14 @@
+{
+  "name": "sdt-cdbs-admin",
+  "version": "1.0.0",
+  "description": "SDT Admin - writes CDBS balance notes into Principle patient files",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "Southside Dental Toowoomba",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^31.7.7"
+  }
+}
