@@ -1,0 +1,20 @@
+# SDT Reception - never commit these
+node_modules/
+*.csv
+*.log
+.env
+.env.*
+note-queue.json
+thanks-sent.json
+birthday-sent.json
+patient-state.json
+settings.json
+morning-settings.json
+auto-jobs.json
+*.pdf
+reports/
+collected/
+balances/
+*.zip
+Thumbs.db
+desktop.ini
