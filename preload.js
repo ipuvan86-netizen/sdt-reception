@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('cdbs', {
   runallSched: (p) => ipcRenderer.invoke('runall-sched', p),
   fleetLastruns: () => ipcRenderer.invoke('fleet-lastruns'),
   runHistory: () => ipcRenderer.invoke('run-history'),
+  debugFeedLink: () => ipcRenderer.invoke('debug-feed-link'),
   autoGet: () => ipcRenderer.invoke('auto-get'),
   shareHtmlGet: () => ipcRenderer.invoke('share-html-get'),
   shareHtmlSave: () => ipcRenderer.invoke('share-html-save'),

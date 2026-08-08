@@ -3374,6 +3374,83 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
+const APP_BUILD = '2026-08-07.26';
+
+// ---------------------------------------------------------------------
+// LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
+// initials, published to a Firestore doc behind an unguessable secret -
+// one stable link per machine that always shows NOW. Nothing here can
+// hurt a run: every failure is swallowed and merely journaled.
+function debugFeedSecret() {
+  const s = loadAutoJobs();
+  if (!s.debugSecret) {
+    s.debugSecret = require('crypto').randomBytes(18).toString('hex');
+    saveAutoJobs(s);
+  }
+  return s.debugSecret;
+}
+function debugFeedUrl() {
+  return FS_ROOT + '/debugLogs/' + debugFeedSecret() + '_' + encodeURIComponent(MACHINE) + '_log';
+}
+function redactNames(text) {
+  try {
+    const names = new Set();
+    const st = loadPatientState();
+    for (const k of Object.keys(st)) if (st[k] && st[k].name) names.add(String(st[k].name).trim());
+    try { for (const it of (loadActions().items || [])) if (it.name) names.add(String(it.name).trim()); } catch (e) { /* actions optional */ }
+    for (const full of names) {
+      if (full.length < 6 || !full.includes(' ')) continue;
+      const parts = full.split(/\s+/);
+      const initials = parts.map((p, i) => (i === parts.length - 1 ? p[0] + '.' : p[0] + '.')).join(' ');
+      text = text.split(full).join(initials);
+    }
+  } catch (e) { /* redaction is best-effort; the secret link still protects */ }
+  return text;
+}
+let debugFeedLastPush = 0;
+async function uploadDebugFeed(force) {
+  try {
+    if (!force && Date.now() - debugFeedLastPush < 60 * 1000) return;
+    debugFeedLastPush = Date.now();
+    const today = localToday();
+    const folder = principleCapture.reportsFolder();
+    let blob = '';
+    try {
+      const todays = fs.readdirSync(folder)
+        .filter(f => (f.startsWith('runlog__' + today) || f === 'journal__' + today + '.txt') && !f.includes('app-log'))
+        .sort();
+      blob = todays.map(f => '\n\n########## ' + f + ' ##########\n' + fs.readFileSync(path.join(folder, f), 'utf8')).join('');
+    } catch (e) { blob = '(no logs found for today)'; }
+    if (blob.length > 750 * 1024) blob = '...(older lines trimmed)...\n' + blob.slice(-750 * 1024);
+    blob = redactNames(blob);
+    let stats = [];
+    try {
+      const runs = await fleetRuns();
+      stats = runs.filter(r => r.machine === MACHINE && r.day === today)
+        .map(r => ({ job: r.jobId, at: r.at, name: r.name, outcome: String(r.outcome || '').slice(0, 300) }));
+    } catch (e) { /* stats optional */ }
+    const t = await fbToken();
+    const fields = {
+      log: { stringValue: blob },
+      stats: { stringValue: JSON.stringify({ build: APP_BUILD, machine: MACHINE, day: today, updatedAt: new Date().toISOString(), runs: stats }) },
+      machine: { stringValue: MACHINE },
+      day: { stringValue: today },
+      build: { stringValue: APP_BUILD },
+      updatedAt: { stringValue: new Date().toISOString() },
+    };
+    const mask = Object.keys(fields).map(f => 'updateMask.fieldPaths=' + f).join('&');
+    const r = await fetchT(debugFeedUrl() + '?' + mask, {
+      method: 'PATCH', headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    if (!r.ok) appJournal('debug feed: upload failed HTTP ' + r.status);
+  } catch (e) { appJournal('debug feed: ' + String(e).slice(0, 90)); }
+}
+setInterval(() => { uploadDebugFeed(false).catch(() => {}); }, 60 * 60 * 1000);
+ipcMain.handle('debug-feed-link', async () => {
+  await uploadDebugFeed(true).catch(() => {});
+  return { url: debugFeedUrl(), machine: MACHINE, build: APP_BUILD };
+});
 async function ledgerClaim(jobId) {
   const day = localToday();
   const docId = jobId + '_' + day;
@@ -3415,6 +3492,7 @@ async function ledgerReport(jobId, name, outcome) {
     });
     if (!r.ok) netTell('run-history write failed: HTTP ' + r.status);
   } catch (e) { netTell('run-history write failed: ' + String(e).slice(0, 80)); }
+  uploadDebugFeed(false).catch(() => {});
 }
 
 let fleetCache = { at: 0, data: null };

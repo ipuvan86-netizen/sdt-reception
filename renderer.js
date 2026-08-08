@@ -1368,6 +1368,15 @@ const DAY_LABELS = ['S','M','T','W','T','F','S'];
     $('runAllTime').value = s.runAllTime || '08:30';
   } catch (e) { /* first paint */ }
 })();
+$('btnDebugLink').addEventListener('click', async () => {
+  $('debugLinkMsg').textContent = 'Fetching…';
+  try {
+    const r = await window.cdbs.debugFeedLink();
+    await navigator.clipboard.writeText(r.url);
+    $('debugLinkMsg').textContent = 'Copied! (' + r.machine + ', build ' + r.build + ')';
+  } catch (e) { $('debugLinkMsg').textContent = 'Could not fetch the link - check the journal.'; }
+});
+
 $('btnRunHistory').addEventListener('click', async () => {
   const pan = $('histPanel');
   pan.style.display = 'block';

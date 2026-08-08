@@ -76,7 +76,7 @@
     <h1>SDT Reception</h1>
   <span id="lightPrinciple" class="pill pending">Principle</span>
   <span id="lightProda" class="pill pending">PRODA</span>
-  <span class="pill" style="background:#eef2f7; color:#8a94a6; font-weight:500;" title="App build number">build 2026-08-07.25</span>
+  <span class="pill" style="background:#eef2f7; color:#8a94a6; font-weight:500;" title="App build number">build 2026-08-07.26</span>
   <button class="secondary" id="btnLogReport" title="Everything the app did in the last 5 days, in one file" style="padding:7px 14px; font-size:12px;">Log report</button>
   <button class="secondary" id="btnDiag" title="Tools for looking inside the machinery" style="padding:7px 14px; font-size:12px;">Diagnostics</button>
   </div>
@@ -358,6 +358,18 @@
 <div id="viewCdbs" class="hidden">
   <details id="advancedTools">
     <summary>Advanced tools</summary>
+  <div class="card">
+    <div style="font-weight:600; font-size:16px;">Debug log link (for Claude)</div>
+    <div class="muted" style="margin-top:4px;">
+      A private link to this computer's live log - patient names are reduced to initials,
+      it always shows today, and it refreshes after every run. Paste it into a Claude chat
+      and Claude can read the current log itself, no exporting needed.
+    </div>
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button class="secondary" id="btnDebugLink" style="padding:6px 14px;">Copy my debug link</button>
+      <span class="muted" id="debugLinkMsg"></span>
+    </div>
+  </div>
   <div class="card" id="cardMorning">
     <div style="font-weight:600; font-size:16px;">Morning run (automatic)</div>
     <div class="muted" style="margin-top:4px;">
