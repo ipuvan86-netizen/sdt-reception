@@ -1368,6 +1368,45 @@ const DAY_LABELS = ['S','M','T','W','T','F','S'];
     $('runAllTime').value = s.runAllTime || '08:30';
   } catch (e) { /* first paint */ }
 })();
+(async () => { try { const b = await window.cdbs.appBuild(); $('buildBadge').textContent = 'build ' + b.build; } catch (e) { $('buildBadge').textContent = 'build ?'; } })();
+
+$('btnEditDebugTpl').addEventListener('click', async () => {
+  const r = await window.cdbs.debugTemplateGet();
+  $('tplText').value = r.template;
+  $('tplState').textContent = r.isCustom ? 'custom template in use' : 'default template';
+  $('tplMsg').textContent = '';
+  $('tplPanel').style.display = 'block';
+});
+$('btnTplClose').addEventListener('click', () => { $('tplPanel').style.display = 'none'; });
+$('btnTplSave').addEventListener('click', async () => {
+  await window.cdbs.debugTemplateSave({ template: $('tplText').value });
+  $('tplState').textContent = 'custom template in use';
+  $('tplMsg').textContent = 'Saved - Copy debug prompt now uses this.';
+});
+$('btnTplReset').addEventListener('click', async () => {
+  if (!confirm('Throw away your edits and go back to the built-in template?')) return;
+  await window.cdbs.debugTemplateSave({ reset: true });
+  const r = await window.cdbs.debugTemplateGet();
+  $('tplText').value = r.template;
+  $('tplState').textContent = 'default template';
+  $('tplMsg').textContent = 'Reset to default.';
+});
+
+$('btnAdvTools').addEventListener('click', () => {
+  showView2('viewCdbs');
+  const adv = document.getElementById('advancedTools');
+  if (adv) { adv.open = true; adv.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+});
+
+$('btnDebugPrompt').addEventListener('click', async () => {
+  $('debugLinkMsg').textContent = 'Building prompt…';
+  try {
+    const r = await window.cdbs.debugPrompt();
+    await navigator.clipboard.writeText(r.prompt);
+    $('debugLinkMsg').textContent = 'Prompt copied (' + r.machine + ', build ' + r.build + ') - paste into any AI, then fill in FEATURE and SYMPTOM.';
+  } catch (e) { $('debugLinkMsg').textContent = 'Could not build the prompt - check the journal.'; }
+});
+
 $('btnDebugLink').addEventListener('click', async () => {
   $('debugLinkMsg').textContent = 'Fetching…';
   try {

@@ -76,8 +76,8 @@
     <h1>SDT Reception</h1>
   <span id="lightPrinciple" class="pill pending">Principle</span>
   <span id="lightProda" class="pill pending">PRODA</span>
-  <span class="pill" style="background:#eef2f7; color:#8a94a6; font-weight:500;" title="App build number">build 2026-08-07.26</span>
-  <button class="secondary" id="btnLogReport" title="Everything the app did in the last 5 days, in one file" style="padding:7px 14px; font-size:12px;">Log report</button>
+  <span class="pill" id="buildBadge" style="background:#eef2f7; color:#8a94a6; font-weight:500;" title="App build number">build …</span>
+  <button class="secondary" id="btnAdvTools" title="Morning run settings, debug tools, engine controls" style="padding:7px 14px; font-size:12px;">Advanced tools</button>
   <button class="secondary" id="btnDiag" title="Tools for looking inside the machinery" style="padding:7px 14px; font-size:12px;">Diagnostics</button>
   </div>
   <div class="row">
@@ -367,6 +367,9 @@
     </div>
     <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
       <button class="secondary" id="btnDebugLink" style="padding:6px 14px;">Copy my debug link</button>
+      <button class="secondary" id="btnDebugPrompt" style="padding:6px 14px;">Copy debug prompt</button>
+      <button class="secondary" id="btnLogReport" title="Everything the app did in the last 5 days, in one file" style="padding:6px 14px;">Log report</button>
+      <button class="secondary" id="btnEditDebugTpl" style="padding:6px 14px;">Edit debug template</button>
       <span class="muted" id="debugLinkMsg"></span>
     </div>
   </div>
@@ -625,6 +628,24 @@
 
 </div>
 </main>
+
+<div id="tplPanel" style="display:none; position:fixed; top:6vh; left:50%; transform:translateX(-50%); width:min(760px, 94vw); max-height:84vh; overflow:auto; background:#fff; border:1px solid #d2d2d7; border-radius:16px; box-shadow:0 18px 60px rgba(0,0,0,.25); padding:18px; z-index:6000;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+        <strong style="font-size:16px; flex:1;">Debug prompt template</strong>
+        <span class="muted" id="tplState" style="font-size:12px;"></span>
+        <button class="secondary" id="btnTplClose" style="padding:6px 14px;">Close</button>
+      </div>
+      <div class="muted" style="font-size:12.5px; margin-bottom:8px;">
+        The placeholders <code>{{LOG_URL}}</code>, <code>{{MACHINE}}</code> and <code>{{BUILD}}</code> are filled
+        in automatically each time you press Copy debug prompt — keep them where you want those values to appear.
+      </div>
+      <textarea id="tplText" style="width:100%; min-height:52vh; font-family:ui-monospace, Consolas, monospace; font-size:12.5px; border:1px solid #d2d2d7; border-radius:10px; padding:10px; box-sizing:border-box;"></textarea>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" id="btnTplSave" style="padding:6px 16px;">Save</button>
+        <button class="secondary" id="btnTplReset" style="padding:6px 14px;">Reset to default</button>
+        <span class="muted" id="tplMsg" style="font-size:12px; align-self:center;"></span>
+      </div>
+    </div>
 
 <script src="renderer.js"></script>
 </body>

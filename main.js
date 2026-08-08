@@ -3374,7 +3374,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-07.26';
+const APP_BUILD = '2026-08-07.31';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3447,9 +3447,67 @@ async function uploadDebugFeed(force) {
   } catch (e) { appJournal('debug feed: ' + String(e).slice(0, 90)); }
 }
 setInterval(() => { uploadDebugFeed(false).catch(() => {}); }, 60 * 60 * 1000);
+ipcMain.handle('app-build', () => ({ build: APP_BUILD, machine: MACHINE }));
+
 ipcMain.handle('debug-feed-link', async () => {
   await uploadDebugFeed(true).catch(() => {});
   return { url: debugFeedUrl(), machine: MACHINE, build: APP_BUILD };
+});
+
+// One-click, AI-agnostic debug prompt: the full audit procedure with THIS
+// machine's live log link, build and name baked in - paste into any AI.
+const DEFAULT_DEBUG_PROMPT = [
+'You are a Senior Electron/Node.js Code Auditor with 15+ years of experience reverse-engineering large, undocumented desktop applications. Your specialty is tracing execution flows through automation-heavy codebases (browser automation, timers, IPC, Firebase sync) and producing debugging roadmaps a non-programmer can follow.',
+'',
+'THE APP: "SDT Reception" - an Electron desktop app automating dental practice workflows: PRODA/HPOS balance checking, SMS sending, patient action lists, and Firebase sync across multiple machines (a shared run-ledger, cloud sent-memories, a fleet of installs reading the same data). principle-engine.js is frozen by policy - analyse freely, never propose edits to it.',
+'',
+'THE CODE: my private GitHub repo ipuvan86-netizen/sdt-reception (branch main) - read it from there if you have GitHub access (start with README.md). If you cannot access it, say so and I will attach the files instead - never analyse from assumptions.',
+'',
+'THE LIVE LOG (fetch this yourself, first): {{LOG_URL}}',
+'It returns JSON: the "stats" field is a summary (build, machine, per-run outcomes) - read it first; the "log" field is today\'s full prose log (patient names are initials). This machine is {{MACHINE}} on build {{BUILD}} - if the feed\'s build differs, STOP and tell me before analysing.',
+'',
+'THE FEATURE I WANT ANALYSED: [describe it here]',
+'THE SYMPTOM: [what I observed vs expected, and when - or "no symptom, full audit"]',
+'',
+'YOUR TASK - in order:',
+'1. LOCATE: every function, variable, timer, interval, event listener, IPC channel and config value involved in the feature, including indirect influences (shared state, guards, flags set elsewhere, cloud documents) - with file names and approximate line numbers. Follow the flow across files; do not stop at file boundaries.',
+'2. EXECUTION MAP: a numbered runtime walkthrough from trigger to outcome. Per step: what fires it, what it reads, changes, writes (files/Firebase/UI/Telegram), and what happens on failure. Name real functions and variables. Quote matching log lines from the live feed against the steps where today\'s runs show this flow.',
+'3. DECISION POINTS: every if/else, guard or early return, in plain English - and which path today\'s run actually took where the log shows it.',
+'4. HANG CENSUS: every await in the flow - timeout or can it wait forever? Match any long silent gaps in the log timestamps to the await that likely caused them.',
+'5. CROSS-MACHINE STATE: anything another machine, the cloud, or a previous run could have set, and how stale/conflicting values change behaviour on this machine.',
+'6. DEBUG CHECKPOINTS: per step, one concrete check - an exact log line, a Firebase field, a file, a UI change.',
+'7. RISK FLAGS: races, silent catches, stale state, hardcoded values, duplicated logic.',
+'',
+'EVIDENCE RULES: quote code verbatim or label INFERRED; quote log lines for runtime claims or label INFERRED; rate findings CONFIRMED / LIKELY / SPECULATIVE; analysis only - do NOT rewrite code; if the feature cannot be found, list the closest candidates and ask; explain for a smart non-programmer learning to code, defining technical names on first use.',
+].join('\n');
+
+function renderDebugPrompt() {
+  const s = loadAutoJobs();
+  const tpl = (s.debugPromptTemplate && String(s.debugPromptTemplate).trim()) ? s.debugPromptTemplate : DEFAULT_DEBUG_PROMPT;
+  return String(tpl)
+    .split('{{LOG_URL}}').join(debugFeedUrl())
+    .split('{{MACHINE}}').join(MACHINE)
+    .split('{{BUILD}}').join(APP_BUILD);
+}
+
+ipcMain.handle('debug-prompt', async () => {
+  await uploadDebugFeed(true).catch(() => {});
+  return { prompt: renderDebugPrompt(), machine: MACHINE, build: APP_BUILD };
+});
+
+ipcMain.handle('debug-template-get', () => {
+  const s = loadAutoJobs();
+  const custom = !!(s.debugPromptTemplate && String(s.debugPromptTemplate).trim());
+  return { template: custom ? s.debugPromptTemplate : DEFAULT_DEBUG_PROMPT, isCustom: custom };
+});
+
+ipcMain.handle('debug-template-save', (e, p) => {
+  const s = loadAutoJobs();
+  if (p && p.reset) { delete s.debugPromptTemplate; saveAutoJobs(s); return { ok: true, reset: true }; }
+  s.debugPromptTemplate = String((p && p.template) || '').slice(0, 20000);
+  saveAutoJobs(s);
+  appJournal('debug prompt template edited');
+  return { ok: true };
 });
 async function ledgerClaim(jobId) {
   const day = localToday();
