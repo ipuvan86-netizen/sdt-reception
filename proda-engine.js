@@ -859,19 +859,31 @@ function readResultScript() {
     const clean = t => String(t || '').replace(/\\s+/g, ' ').trim();
     const text = clean(document.body ? (document.body.innerText || '') : '');
 
+    // Static page furniture must never count as a reply: the CDBS page
+    // now shows a "Program Information" panel and the form's own help
+    // text on the same screen as any answer (HPOS layout change,
+    // discovered 2026-08-08 via form forensics).
+    const isFurniture = (s) => /known only by one name|date of birth\\s*dd\\/mm\\/yyyy|Program Information|benefit program for children/i.test(s || '');
+    const take = (m) => (m && !isFurniture(m[1])) ? clean(m[1]) : '';
+
     // The balance sentence, exactly as PRODA words it.
     const balanceMatch = text.match(/([^.]*has an available balance of[^.]*\\.)/i);
 
-    // The eligibility statement, if there is one.
-    const eligibleMatch = text.match(/((?:Yes|No)[^.]*eligib[^.]*\\.)/i);
+    // The eligibility statement - Yes/No anchored as whole words, so the
+    // "no" inside "known" can never fake a reply.
+    const eligibleMatch = text.match(/(\\b(?:Yes|No)\\b[,:]?\\s[^.]*eligib[^.]*\\.)/i);
+
+    // The matched-but-details-differ response.
+    const differMatch = text.match(/([^.]*matched using the submitted data[^.]*\\.)/i);
 
     // Anything that reads like an error or a warning.
     const errorMatch = text.match(/((?:We could not|Unable to|No match|not found|invalid|incorrect|does not match)[^.]*\\.)/i);
 
     return {
-      balanceLine: balanceMatch ? clean(balanceMatch[1]) : '',
-      eligibilityLine: eligibleMatch ? clean(eligibleMatch[1]) : '',
-      errorLine: errorMatch ? clean(errorMatch[1]) : '',
+      balanceLine: take(balanceMatch),
+      eligibilityLine: take(eligibleMatch),
+      differLine: take(differMatch),
+      errorLine: take(errorMatch),
       stillOnForm: !!document.getElementsByName('guiForm:gui_search')[0],
       hasNewSearch: !!document.getElementsByName('guiForm:gui_newSearch')[0],
     };
@@ -897,7 +909,7 @@ async function checkBalance({ cardNumber, irn, firstName }) {
     if (!isOpen()) return { ok: false, reason: 'window-closed' };
     if (prodaWindow.webContents.isLoading()) continue;
     result = await runInPage(readResultScript());
-    if (result && !result.error && (result.balanceLine || result.eligibilityLine || result.errorLine || result.hasNewSearch)) break;
+    if (result && !result.error && (result.balanceLine || result.eligibilityLine || result.errorLine || result.differLine)) break;
   }
 
   if (await checkSignedOut()) return { ok: false, reason: 'signed-out' };
@@ -920,6 +932,9 @@ async function checkBalance({ cardNumber, irn, firstName }) {
   }
   if (result.errorLine) {
     return { ok: false, reason: 'proda-said', text: result.errorLine };
+  }
+  if (result.differLine) {
+    return { ok: false, reason: 'details-differ', text: result.differLine };
   }
   return { ok: false, reason: 'nothing-returned' };
 }

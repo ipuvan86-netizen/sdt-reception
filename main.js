@@ -1521,13 +1521,13 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
       await logFormForensics('after heal');
     }
     runlog('patient ' + (i + 1) + ' "' + item.name + '": reply=' + (res.ok ? 'ok' : (res.reason || 'fail')) + ' text="' + String(res.text || '').slice(0, 60) + '"');
-    if (!(!res.ok && res.text && /invalid entry/i.test(res.text))) {
+    if (!(!res.ok && res.text && /invalid entry|matched using the submitted data/i.test(res.text))) {
       if (!res.ok && !item.dob) runlog('  healing skipped: no date of birth on the row');
     }
-    if (!res.ok && res.text && /invalid entry/i.test(res.text) && !item.dob) {
+    if (!res.ok && res.text && /invalid entry|matched using the submitted data/i.test(res.text) && !item.dob) {
       runlog('  healing skipped: invalid entry but no date of birth on the row');
     }
-    if (!res.ok && res.text && /invalid entry/i.test(res.text) && item.dob) {
+    if (!res.ok && res.text && /invalid entry|matched using the submitted data/i.test(res.text) && item.dob) {
       runlog('  healing attempt: dob=' + item.dob);
       const dob8 = dob8Of(item.dob);
       const nm = splitName(item.name);
@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.6';
+const APP_BUILD = '2026-08-08.7';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
