@@ -1397,143 +1397,103 @@ $('fAssign').addEventListener('change', () => {
   refreshActions();
 });
 
-// ---------- Views: shared audience picker ----------
-// One panel for everything: item chips AND section rules. Nothing writes
-// until Save is pressed - one atomic change, no live toggling, and the
-// open panel is never rebuilt underneath a tap (the glitch fix).
-function openAudiencePicker(opts) {
-  const old = document.getElementById('vwOverlay'); if (old) old.remove();
-  const od = document.createElement('div');
-  od.id = 'vwOverlay';
-  od.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;display:flex;align-items:center;justify-content:center;';
-  od.innerHTML = `<div style="background:#fff;border-radius:16px;padding:18px;max-width:340px;width:92%;max-height:72%;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.2);">
-    <div style="font-weight:700;margin-bottom:4px;">${esc(opts.title)}</div>
-    ${opts.subtitle ? `<div class="muted" style="font-size:12px;margin-bottom:10px;">${esc(opts.subtitle)}</div>` : ''}
-    ${opts.options.length
-      ? opts.options.map(o => `<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:13.5px;"><input type="checkbox" data-vwopt="${esc(o)}" ${opts.selected.includes(o) ? 'checked' : ''} style="width:17px;height:17px;"> ${esc(o)}</label>`).join('')
-      : '<div class="muted">No views yet — add one with ＋ in Advanced tools → Views.</div>'}
-    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-      <button id="vwSaveBtn">Save</button>
-      ${opts.ruleButton ? '<button id="vwRuleBtn" class="secondary">Use section rule</button>' : ''}
-      <button id="vwCancelBtn" class="secondary">Cancel</button>
-    </div>
-    <div class="muted" style="margin-top:9px;font-size:11.5px;">${esc(opts.footer || 'No boxes ticked = Everyone.')}</div>
-  </div>`;
-  document.body.appendChild(od);
-  od.addEventListener('click', (e) => { if (e.target === od) od.remove(); });
-  document.getElementById('vwCancelBtn').onclick = () => od.remove();
-  if (opts.ruleButton) document.getElementById('vwRuleBtn').onclick = () => { od.remove(); opts.onUseRule(); };
-  document.getElementById('vwSaveBtn').onclick = () => {
-    const picked = [...od.querySelectorAll('input[data-vwopt]')].filter(c => c.checked).map(c => c.getAttribute('data-vwopt'));
-    od.remove(); opts.onSave(picked);
-  };
-}
-function askText(title) {
-  return new Promise((resolve) => {
-    const old = document.getElementById('vwOverlay'); if (old) old.remove();
-    const od = document.createElement('div');
-    od.id = 'vwOverlay';
-    od.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;display:flex;align-items:center;justify-content:center;';
-    od.innerHTML = `<div style="background:#fff;border-radius:16px;padding:18px;max-width:320px;width:92%;box-shadow:0 8px 30px rgba(0,0,0,.2);">
-      <div style="font-weight:700;margin-bottom:10px;">${esc(title)}</div>
-      <input type="text" id="vwAskInp" style="width:100%;box-sizing:border-box;" placeholder="e.g. Nurse">
-      <div style="display:flex;gap:8px;margin-top:12px;"><button id="vwAskOk">Add</button><button id="vwAskNo" class="secondary">Cancel</button></div>
-    </div>`;
-    document.body.appendChild(od);
-    const fin = (v) => { od.remove(); resolve(v); };
-    od.addEventListener('click', (e) => { if (e.target === od) fin(null); });
-    const inp = document.getElementById('vwAskInp');
-    inp.focus();
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') fin(inp.value); if (e.key === 'Escape') fin(null); });
-    document.getElementById('vwAskOk').onclick = () => fin(inp.value);
-    document.getElementById('vwAskNo').onclick = () => fin(null);
-  });
-}
+// ---------- Views: per-item audience editor ----------
 async function openViewsEditor(id) {
   const a = await window.cdbs.actionGet();
   const it = (a.items || []).find(x => x.id === id);
   if (!it) return;
   const vCfg = window.__vCfg || { views: [], rules: {} };
-  const options = [...vCfg.views, ...(window.__vNames || []).filter(n => !vCfg.views.includes(n))];
+  const opts = [...vCfg.views, ...(window.__vNames || []).filter(n => !vCfg.views.includes(n))];
   const man = String(it.viewsTag || '').trim();
   const manual = man && man !== '*' ? man.split(',').map(s => s.trim()) : [];
   const ruleT = (vCfg.rules[it.section || 'CDBS'] || []);
-  openAudiencePicker({
-    title: 'Who sees this item',
-    subtitle: it.name + (man ? '' : ' — following the section rule'),
-    options, selected: man ? manual : ruleT,
-    ruleButton: true,
-    footer: 'No boxes ticked = Everyone. The assigned dentist always sees their items regardless of tags.',
-    onUseRule: async () => { await window.cdbs.actionViewsTag({ id, tag: '' }); refreshActions(true); },
-    onSave: async (picked) => { await window.cdbs.actionViewsTag({ id, tag: picked.length ? picked.join(',') : '*' }); refreshActions(true); },
-  });
+  const sel = man ? manual : ruleT;
+  const old = document.getElementById('vwOverlay'); if (old) old.remove();
+  const od = document.createElement('div');
+  od.id = 'vwOverlay';
+  od.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;display:flex;align-items:center;justify-content:center;';
+  od.innerHTML = `<div style="background:#fff;border-radius:16px;padding:18px;max-width:340px;width:92%;max-height:72%;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.2);">
+    <div style="font-weight:700;margin-bottom:4px;">Who sees this item</div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px;">${esc(it.name)}${man ? '' : ' — currently following the section rule'}</div>
+    ${opts.length ? opts.map(o => `<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:13.5px;"><input type="checkbox" data-vwopt="${esc(o)}" ${sel.includes(o) ? 'checked' : ''} style="width:17px;height:17px;"> ${esc(o)}</label>`).join('') : '<div class="muted">No views yet — add some in Advanced tools → Views.</div>'}
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+      <button id="vwSaveBtn">Save</button>
+      <button id="vwRuleBtn" class="secondary">Use section rule</button>
+      <button id="vwCancelBtn" class="secondary">Cancel</button>
+    </div>
+    <div class="muted" style="margin-top:9px;font-size:11.5px;">No boxes ticked = Everyone. The assigned dentist always sees their items regardless of tags.</div>
+  </div>`;
+  document.body.appendChild(od);
+  od.addEventListener('click', (e) => { if (e.target === od) od.remove(); });
+  document.getElementById('vwCancelBtn').onclick = () => od.remove();
+  document.getElementById('vwRuleBtn').onclick = async () => {
+    await window.cdbs.actionViewsTag({ id, tag: '' });
+    od.remove(); refreshActions(true);
+  };
+  document.getElementById('vwSaveBtn').onclick = async () => {
+    const picked = [...od.querySelectorAll('input[data-vwopt]')].filter(c => c.checked).map(c => c.getAttribute('data-vwopt'));
+    await window.cdbs.actionViewsTag({ id, tag: picked.length ? picked.join(',') : '*' });
+    od.remove(); refreshActions(true);
+  };
 }
 
 // ---------- Views: manage views + section rules (Advanced tools) ----------
-async function saveViewsCfg(vCfg) {
-  await window.cdbs.viewsConfigSet({ views: vCfg.views, rules: vCfg.rules });
-  refreshActions(true);
+let __vSaveTimer = null;
+function saveViewsCfg(vCfg) {
+  clearTimeout(__vSaveTimer);
+  __vSaveTimer = setTimeout(async () => {
+    await window.cdbs.viewsConfigSet({ views: vCfg.views, rules: vCfg.rules });
+    refreshActions(true);
+  }, 400);
 }
 function renderViewsBox(vCfg, names) {
-  const selEl = document.getElementById('vwSelMgr'), rulesEl = document.getElementById('vwRules');
-  if (!selEl || !rulesEl) return;
-  if (document.getElementById('vwOverlay')) return;           // never rebuild under an open panel
+  const listEl = document.getElementById('vwList'), rulesEl = document.getElementById('vwRules');
+  if (!listEl || !rulesEl) return;
   const sig = JSON.stringify([vCfg.views, vCfg.rules, names, window.__vSecs || []]);
-  if (rulesEl.dataset.sig === sig) return;                    // nothing changed - leave handlers alone
-  rulesEl.dataset.sig = sig;
-  const keep = selEl.value;
-  selEl.innerHTML = vCfg.views.length
-    ? vCfg.views.map(v => `<option${v === keep ? ' selected' : ''}>${esc(v)}</option>`).join('')
-    : '<option value="">no views yet</option>';
+  if (listEl.dataset.sig === sig) return;                     // nothing changed - keep any half-typed input
+  listEl.dataset.sig = sig;
+  listEl.innerHTML = vCfg.views.length
+    ? vCfg.views.map(v => `<span class="chip" style="font-size:13px;padding:6px 12px;">${esc(v)} <a href="#" data-vwdel="${esc(v)}" style="color:#c0392b;text-decoration:none;margin-left:4px;" title="Remove this view — its items fall back to showing everywhere">✕</a></span>`).join(' ')
+    : '<span class="muted">No views yet — add Reception, Nurse, or anything you like.</span>';
   const secs = window.__vSecs || [];
   const opts = [...vCfg.views, ...names.filter(n => !vCfg.views.includes(n))];
   rulesEl.innerHTML = secs.map(s => {
     const cur = vCfg.rules[s] || [];
-    const lab = cur.length ? esc(cur[0]) + (cur.length > 1 ? ' +' + (cur.length - 1) : '') : 'Everyone';
-    return `<div class="row" style="padding:7px 0;border-bottom:1px solid #f5f5f7;align-items:center;">
-      <span style="flex:1;font-weight:600;font-size:13px;">${esc(s)}</span>
-      <button class="secondary" data-vwrule="${esc(s)}" style="font-size:12px;padding:6px 12px;">Seen by: ${lab} ▾</button>
+    return `<div class="row" style="padding:7px 0;border-bottom:1px solid #f5f5f7;align-items:center;flex-wrap:wrap;">
+      <span style="min-width:170px;font-weight:600;font-size:13px;">${esc(s)}</span>
+      ${opts.map(o => `<span class="chip" data-vwrule="${esc(s)}::${esc(o)}" style="cursor:pointer;font-size:12px;${cur.includes(o) ? 'background:#e6f4ec;color:#1d7a46;font-weight:700;' : ''}">${esc(o)}</span>`).join('')}
+      ${cur.length ? '' : '<span class="muted" style="font-size:11.5px;">everyone</span>'}
     </div>`;
   }).join('') || '<div class="muted">Sections appear here once the list has items.</div>';
-  rulesEl.querySelectorAll('button[data-vwrule]').forEach(el => el.onclick = () => {
-    const s = el.getAttribute('data-vwrule');
-    openAudiencePicker({
-      title: 'Who sees: ' + s,
-      subtitle: 'Applies to every current and future item in this section (👁 chips on items override it).',
-      options: opts, selected: vCfg.rules[s] || [],
-      footer: 'No boxes ticked = Everyone.',
-      onSave: (picked) => {
-        if (picked.length) vCfg.rules[s] = picked; else delete vCfg.rules[s];
-        saveViewsCfg(vCfg);
-      },
-    });
+  listEl.querySelectorAll('a[data-vwdel]').forEach(el => el.onclick = (e) => {
+    e.preventDefault();
+    const v = el.getAttribute('data-vwdel');
+    if (!confirm('Remove the view "' + v + '"? Items tagged only to it will show in every view again.')) return;
+    vCfg.views = vCfg.views.filter(x => x !== v);
+    for (const s of Object.keys(vCfg.rules)) vCfg.rules[s] = (vCfg.rules[s] || []).filter(x => x !== v);
+    saveViewsCfg(vCfg);
+  });
+  rulesEl.querySelectorAll('span[data-vwrule]').forEach(el => el.onclick = () => {
+    const [s, o] = el.getAttribute('data-vwrule').split('::');
+    const cur = vCfg.rules[s] || [];
+    vCfg.rules[s] = cur.includes(o) ? cur.filter(x => x !== o) : [...cur, o];
+    if (!vCfg.rules[s].length) delete vCfg.rules[s];
+    saveViewsCfg(vCfg);
   });
 }
 (() => {
-  const btnAdd = document.getElementById('btnVwAdd'), btnDel = document.getElementById('btnVwDel'), selEl = document.getElementById('vwSelMgr');
-  if (!btnAdd || !btnDel || !selEl) return;
-  btnAdd.addEventListener('click', async () => {
-    const v0 = await askText('Name the new view');
-    const v = (v0 || '').trim().slice(0, 40);
+  const btn = document.getElementById('btnVwAdd'), inp = document.getElementById('vwNew');
+  if (!btn || !inp) return;
+  const add = () => {
+    const v = (inp.value || '').trim().slice(0, 40);
     if (!v) return;
     const vCfg = window.__vCfg || { views: [], rules: {} };
-    if (!vCfg.views.includes(v)) { vCfg.views.push(v); await saveViewsCfg(vCfg); }
-    selEl.value = v;
-  });
-  btnDel.addEventListener('click', async () => {
-    const v = selEl.value;
-    if (!v) return;
-    if (!confirm('Delete the view "' + v + '"? Items tagged only to it will show in every view again.')) return;
-    const vCfg = window.__vCfg || { views: [], rules: {} };
-    vCfg.views = vCfg.views.filter(x => x !== v);
-    for (const s of Object.keys(vCfg.rules)) {
-      vCfg.rules[s] = (vCfg.rules[s] || []).filter(x => x !== v);
-      if (!vCfg.rules[s].length) delete vCfg.rules[s];
-    }
-    await saveViewsCfg(vCfg);
-  });
+    if (!vCfg.views.includes(v)) { vCfg.views.push(v); saveViewsCfg(vCfg); }
+    inp.value = '';
+  };
+  btn.addEventListener('click', add);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
 })();
-
 
 
 // ---------- Auto Reports ----------

@@ -367,10 +367,10 @@
       and a dentist always sees everything assigned to them — tags can only add, never hide.
     </div>
     <div class="row" style="margin-top:12px; gap:8px; align-items:center; flex-wrap:wrap;">
-      <select id="vwSelMgr" style="font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:7px; min-width:180px;"></select>
-      <button class="secondary" id="btnVwAdd" title="Add a new view" style="padding:7px 14px;">＋ Add view</button>
-      <button class="secondary" id="btnVwDel" title="Delete the selected view — its items fall back to showing everywhere" style="padding:7px 14px; color:#c0392b;">🗑 Delete</button>
+      <input type="text" id="vwNew" placeholder="new view name (e.g. Nurse)" style="min-width:220px;">
+      <button class="secondary" id="btnVwAdd" style="padding:7px 16px;">Add view</button>
     </div>
+    <div id="vwList" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"></div>
     <div style="font-weight:600; font-size:13.5px; margin-top:14px;">Section rules</div>
     <div id="vwRules" style="margin-top:4px;"></div>
   </div>
