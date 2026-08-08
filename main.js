@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.7';
+const APP_BUILD = '2026-08-08.8';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3429,8 +3429,12 @@ function redactNames(text) {
     for (const full of names) {
       if (full.length < 6 || !full.includes(' ')) continue;
       const parts = full.split(/\s+/);
-      const initials = parts.map((p, i) => (i === parts.length - 1 ? p[0] + '.' : p[0] + '.')).join(' ');
-      text = text.split(full).join(initials);
+      const initials = parts.map((p) => p[0] + '.').join(' ');
+      // Whitespace-insensitive so "Demi  Schneider" (double space in the
+      // report) still masks; each part regex-escaped so names containing
+      // brackets like "((dental))" are safe.
+      const rx = new RegExp(parts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
+      text = text.replace(rx, initials);
     }
   } catch (e) { /* redaction is best-effort; the secret link still protects */ }
   return text;
@@ -4760,14 +4764,16 @@ async function runCheckoutJob(job) {
     return { outcome: 'skipped: Principle needs a login (window opened)' };
   }
   const gen = await principleReport.generateReport(null, (t) => runlog('  ' + t), job.url);
-  if (gen.empty) { runlog('report returned 0 rows - nothing to add today'); return { outcome: '0 item(s) added - report empty', added: 0 }; }
   if (!gen.ok) { runlog('report failed: ' + (gen.reason || '?')); return { outcome: 'failed: report did not generate (' + (gen.reason || '?') + ')' }; }
-  const rows = rowsToObjects(csvToRows(fs.readFileSync(gen.file).toString('utf8')));
+  // An empty report is a SUCCESS (nobody incomplete) - carry on with zero
+  // rows so the auto-clear pass below can tick off cards it vouches for.
+  const rows = gen.empty ? [] : rowsToObjects(csvToRows(fs.readFileSync(gen.file).toString('utf8')));
+  if (gen.empty) runlog('report returned 0 rows - nothing to add today');
   const headers = rows.length ? Object.keys(rows[0]) : [];
   const key = (re) => headers.find(h => re.test(h));
   const nameKey = key(/patient name/i), dateKey = key(/appointment date/i), pracKey = key(/practitioner/i);
   const catKey = key(/treatment category/i), amtKey = key(/treatment amount/i), linkKey = key(/appointment link/i);
-  if (!nameKey) { runlog('no Patient Name column'); return { outcome: 'failed: no Patient Name column' }; }
+  if (rows.length && !nameKey) { runlog('no Patient Name column'); return { outcome: 'failed: no Patient Name column' }; }
   runlog('report rows parsed: ' + rows.length);
 
   let a;
@@ -4798,10 +4804,37 @@ async function runCheckoutJob(job) {
     await fsPush(it);
     added++;
   }
+  // ---- auto-clear (report succeeded, so it can vouch for its window) ----
+  // A checkout card whose appointment sits inside the report's saved
+  // 30-day range (2-day safety margin -> 28) but whose token is no longer
+  // among today's rows means the checkout has since been completed in
+  // Principle. Tick it off automatically, with an audit note. Cards older
+  // than the window can't be judged by this report and are left alone.
+  const seenTokens = new Set();
+  for (const o of rows) {
+    const nm = (o[nameKey] || '').trim();
+    if (!nm) continue;
+    const lk = linkKey ? (o[linkKey] || '').trim() : '';
+    const aid = idFromLink(lk);
+    seenTokens.add('checkout:' + (aid || ((o[dateKey] || '') + ':' + nm)));
+  }
+  let cleared = 0;
+  for (const it of a.items) {
+    if (it.doneAt || it.kind !== 'checkout') continue;
+    const apptD = parseReportDate(String(it.context || '').replace(/^appt\s+/, ''));
+    if (!apptD) continue;                                        // unreadable date - a human decides
+    const ageDays = Math.floor((Date.now() - apptD.getTime()) / 86400000);
+    if (ageDays < 0 || ageDays > 28) continue;                   // outside the report window - can't verify
+    if (seenTokens.has(it.token)) continue;                      // still on the report - genuinely open
+    it.doneAt = now; it.doneNote = 'auto-cleared: no longer on the Principle checkout report'; it.auto = true;
+    await fsPush(it);
+    cleared++;
+    runlog('  "' + it.name + '" auto-cleared: no longer on the report (checked out in Principle)');
+  }
   saveActions(a);
-  runlog('incomplete checkouts: ' + added + ' item(s) added');
+  runlog('incomplete checkouts: ' + added + ' item(s) added' + (cleared ? ', ' + cleared + ' auto-cleared' : ''));
   sendUi('actions-changed', {});
-  return { outcome: added + ' item(s) added', added };
+  return { outcome: added + ' item(s) added' + (cleared ? ', ' + cleared + ' auto-cleared' : ''), added };
 }
 
 async function runReceptionAttnJob(job) {
