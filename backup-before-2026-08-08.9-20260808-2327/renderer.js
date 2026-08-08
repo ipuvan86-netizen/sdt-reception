@@ -1128,7 +1128,7 @@ async function refreshActions(fresh = true) {
   const found = [...new Set([...open, ...sched, ...doneF, ...parkedAll].map(i => i.section || 'CDBS'))];
   const sections = [...preferred.filter(s => found.includes(s)), ...found.filter(s => !preferred.includes(s))];
   const bySection = s => open.filter(i => (i.section || 'CDBS') === s);
-  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'Recalls': '#ff9f0a', 'Complete notes': '#7a5af5' };
+  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93' };
   window.__secCollapsed = window.__secCollapsed || {};
   let upcomingHtml = '';
   if (sched.length) {
