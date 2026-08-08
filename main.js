@@ -1466,6 +1466,24 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
     // HPOS and retry this patient. Rung 2: full fresh login (recoverLogin),
     // re-enter, retry. Three consecutive unhealed failures stop the run
     // cleanly instead of burning the rest of the list.
+    // Crime-scene photographer: when the form bounces, record what the
+    // PRODA window was actually showing - address, masked page text, and
+    // which inputs/buttons existed. Digits are masked (###) so card
+    // numbers and dates of birth never land in a log.
+    const logFormForensics = async (tag) => {
+      try {
+        const fx = await proda.formForensics();
+        if (!fx.ok) { runlog('  [' + tag + '] form forensics unavailable: ' + fx.error); return; }
+        const mask = (s) => String(s || '').replace(/\d{3,}/g, '###').replace(/\s+/g, ' ').trim();
+        runlog('  [' + tag + '] page: ' + mask(fx.url) + ' | title: ' + mask(fx.title));
+        runlog('  [' + tag + '] page text (masked): "' + mask(fx.text).slice(0, 700) + '"');
+        const ins = (fx.inputs || []).map(x => (x.visible ? '' : '~') + (x.id || x.name || x.type || x.tag) + (x.value === '(filled)' ? '*' : '')).join(', ');
+        const btns = (fx.buttons || []).filter(b => b.text).map(b => (b.visible ? '' : '~') + (b.disabled ? '!' : '') + b.text).join(', ');
+        runlog('  [' + tag + '] inputs (~hidden, *filled): ' + ins.slice(0, 500));
+        runlog('  [' + tag + '] buttons (~hidden, !disabled): ' + mask(btns).slice(0, 500));
+      } catch (e) { runlog('  [' + tag + '] form forensics failed: ' + String(e).slice(0, 80)); }
+    };
+
     // A reply that is the search form itself means the CDBS form never
     // really submitted - caught HERE (before the rungs) since 2026-08-08.4,
     // so the re-enter-HPOS heal below fires instead of three instant
@@ -1473,6 +1491,7 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
     if (res && res.ok && /known only by one name|date of birth\s*dd\/mm\/yyyy/i.test(res.text || '')) {
       res.ok = false; res.reason = 'form-boilerplate'; res.text = '';
       runlog('  the reply was the search form itself - re-opening the CDBS form and retrying this patient');
+      await logFormForensics('before heal');
     }
     if (res && res.ok) global.__lastOkReplyAt = Date.now();
     const sessionLooksAlive = (Date.now() - (global.__lastOkReplyAt || 0)) < 90 * 1000;
@@ -1499,6 +1518,7 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
     if (res && res.ok && /known only by one name|date of birth\s*dd\/mm\/yyyy/i.test(res.text || '')) {
       res.ok = false; res.reason = 'form-boilerplate'; res.text = '';
       runlog('  the reply looked like the search form, not a balance - treated as failed and retried next run');
+      await logFormForensics('after heal');
     }
     runlog('patient ' + (i + 1) + ' "' + item.name + '": reply=' + (res.ok ? 'ok' : (res.reason || 'fail')) + ' text="' + String(res.text || '').slice(0, 60) + '"');
     if (!(!res.ok && res.text && /invalid entry/i.test(res.text))) {
@@ -3382,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.5';
+const APP_BUILD = '2026-08-08.6';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to

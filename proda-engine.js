@@ -1054,8 +1054,33 @@ async function keepAlive() {
   } catch (e) { return { ok: false }; }
 }
 
+// What is the PRODA window actually looking at right now? Read-only:
+// address, page text (trimmed), and a census of inputs and buttons.
+// Used by the CDBS run when a reply comes back as the search form, so
+// the runlog carries the crime-scene photo instead of a shrug.
+async function formForensics() {
+  try {
+    if (!prodaWindow || prodaWindow.isDestroyed()) return { ok: false, error: 'no PRODA window' };
+    const url = prodaWindow.webContents.getURL();
+    const data = await prodaWindow.webContents.executeJavaScript(`(() => {
+      const t = (document.body && document.body.innerText) || '';
+      const inputs = Array.from(document.querySelectorAll('input,select,textarea')).slice(0, 40).map(el => ({
+        tag: el.tagName.toLowerCase(), type: el.type || '', id: el.id || '', name: el.name || '',
+        visible: !!(el.offsetWidth || el.offsetHeight), value: el.value ? '(filled)' : '(empty)'
+      }));
+      const buttons = Array.from(document.querySelectorAll('button,input[type=submit],a[role=button]')).slice(0, 40).map(el => ({
+        text: (el.innerText || el.value || '').trim().slice(0, 40),
+        visible: !!(el.offsetWidth || el.offsetHeight), disabled: !!el.disabled
+      }));
+      return { title: document.title || '', text: t.slice(0, 1500), inputs, buttons };
+    })()`, true);
+    return { ok: true, url, title: data.title, text: data.text, inputs: data.inputs, buttons: data.buttons };
+  } catch (e) { return { ok: false, error: String(e).slice(0, 120) }; }
+}
+
 module.exports = {
   keepAlive,
+  formForensics,
   openVisible,
   isOpen,
   setNotifier,
