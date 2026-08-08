@@ -3374,7 +3374,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.1';
+const APP_BUILD = '2026-08-08.2';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3457,44 +3457,15 @@ ipcMain.handle('debug-feed-link', async () => {
 // One-click, AI-agnostic debug prompt: the full audit procedure with THIS
 // machine's live log link, build and name baked in - paste into any AI.
 const DEFAULT_DEBUG_PROMPT = [
-'You are a Senior Electron/Node.js Code Auditor with 15+ years of experience reverse-engineering large, undocumented desktop applications. Your specialty is tracing execution flows through automation-heavy codebases (browser automation, timers, IPC, Firebase sync) and producing debugging roadmaps a non-programmer can follow.',
+'AUDIT LAUNCHER - SDT Reception',
 '',
-'THE APP: "SDT Reception" - an Electron desktop app automating dental practice workflows: PRODA/HPOS balance checking, SMS sending, patient action lists, and Firebase sync across multiple machines (a shared run-ledger, cloud sent-memories, a fleet of installs reading the same data). principle-engine.js is frozen by policy - analyse freely, never propose edits to it.',
+'Adopt the role and follow the FULL procedure in AUDIT-PROMPT.md at the root of my private GitHub repo ipuvan86-netizen/sdt-reception (branch main). Fetch that file FIRST and follow it exactly, including its Step 0 intake interview. If you cannot access the repo, say so and I will attach the files - never analyse from assumptions.',
 '',
-'THE CODE: my private GitHub repo ipuvan86-netizen/sdt-reception (branch main) - read it from there if you have GitHub access (start with README.md). If you cannot access it, say so and I will attach the files instead - never analyse from assumptions.',
+'THIS MACHINE: {{MACHINE}} on build {{BUILD}}.',
+'THIS MACHINE\'S LIVE LOG: {{LOG_URL}}',
+'(DEBUGGING.md in the repo lists every machine\'s log link - the procedure tells you when to fetch the others. If any feed\'s build differs from {{BUILD}}, STOP and tell me before analysing.)',
 '',
-'THE LIVE LOG (fetch this yourself, first): {{LOG_URL}}',
-'It returns JSON: the "stats" field is a summary (build, machine, per-run outcomes) - read it first; the "log" field is today\'s full prose log (patient names are initials). This machine is {{MACHINE}} on build {{BUILD}} - if the feed\'s build differs, STOP and tell me before analysing.',
-'',
-'=== STEP 0 - INTAKE INTERVIEW (always first) ===',
-'Before any analysis:',
-'1. Confirm repo access and fetch the live log feed. If either fails, STOP and tell me.',
-'2. Check whether I have already given you ALL of the following. For anything missing or vague, ask me in ONE numbered plain-English list - with multiple-choice options where possible - then STOP and WAIT for my answers:',
-'   a. THE FEATURE - which part of the app to trace. If I have not named one, list the main feature areas you can see in the repo as a menu and ask me to pick.',
-'   b. MODE - bug hunt, or full audit with no symptom?',
-'   c. If bug hunt - THE SYMPTOM: what I saw vs what I expected, in my own words.',
-'   d. WHEN it started, and whether it happens every run or intermittently.',
-'   e. WHICH MACHINE(S) show it - and whether other machines are affected too.',
-'   f. EVIDENCE beyond the live log - screenshots, Telegram messages, journal panels. If I have none, tell me exactly where to look, and offer to proceed with the live log alone.',
-'   g. RECENT CHANGES - new build, Windows update, network change, or a change on another machine just before it started.',
-'3. Ask ONLY for what is missing - never re-ask what I already provided. If I named a feature you cannot find in the repo, list the closest candidates and ask which one - never guess.',
-'4. When you have enough, restate the case back to me in 2-3 sentences ("On build X, machine Y, feature Z does A but should do B, since <date>") and ask me to confirm before starting the audit.',
-'',
-'=== THE AUDIT - in order (only after Step 0 is confirmed) ===',
-'1. LOCATE: every function, variable, timer, interval, event listener, IPC channel and config value involved in the feature, including indirect influences (shared state, guards, flags set elsewhere, cloud documents) - with file names and approximate line numbers. Follow the flow across files; do not stop at file boundaries.',
-'2. EXECUTION MAP: a numbered runtime walkthrough from trigger to outcome. Per step: what fires it, what it reads, changes, writes (files/Firebase/UI/Telegram), and what happens on failure. Name real functions and variables. Quote matching log lines from the live feed against the steps where today\'s runs show this flow.',
-'3. DECISION POINTS: every if/else, guard or early return, in plain English - and which path today\'s run actually took where the log shows it.',
-'4. HANG CENSUS: every await in the flow - timeout or can it wait forever? Match any long silent gaps in the log timestamps to the await that likely caused them.',
-'5. CROSS-MACHINE STATE: anything another machine, the cloud, or a previous run could have set, and how stale/conflicting values change behaviour on this machine.',
-'6. HISTORY CHECK (when the symptom is "this used to work"): use commit history to compare the flow between the working and broken builds, naming the exact commits that touched it.',
-'7. DEBUG CHECKPOINTS: per step, one concrete check - an exact log line, a Firebase field, a file, a UI change.',
-'8. PRIME SUSPECTS (bug-hunt mode only): rank the 3 most likely causes of MY symptom - the evidence for each, one checkpoint from step 7 that confirms or rules it out, and what result to expect either way.',
-'9. RISK FLAGS: races, silent catches, stale state, hardcoded values, duplicated logic.',
-'',
-'=== EVIDENCE RULES ===',
-'Quote code verbatim or label INFERRED; quote log lines for runtime claims or label INFERRED; rate findings CONFIRMED / LIKELY / SPECULATIVE; analysis only - do NOT rewrite or push code; when the audit is done, ask if I want a fix plan, and even then brainstorm the approach and wait for my go-ahead before writing anything; explain for a smart non-programmer learning to code, defining technical names on first use.',
-'',
-'=== MY BUG (fill what you can; Step 0 asks for the rest) ===',
+'=== MY BUG (fill what you can; the procedure\'s Step 0 interview asks for the rest) ===',
 'FEATURE:',
 'SYMPTOM (or "full audit"):',
 'WHEN IT STARTED / HOW OFTEN:',
@@ -3505,7 +3476,7 @@ const DEFAULT_DEBUG_PROMPT = [
 // this build is cleared ONCE, so every machine picks up the new default.
 // A template the user saves AFTER this build stamps the version and is
 // never touched again.
-const DEBUG_TPL_VERSION = 2;
+const DEBUG_TPL_VERSION = 3;
 function wipeOldDebugTemplate(s) {
   if (s.debugTplVersion === DEBUG_TPL_VERSION) return;
   if (s.debugPromptTemplate) {
