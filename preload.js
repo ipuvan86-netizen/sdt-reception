@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('cdbs', {
   fleetLastruns: () => ipcRenderer.invoke('fleet-lastruns'),
   runHistory: () => ipcRenderer.invoke('run-history'),
   debugFeedLink: () => ipcRenderer.invoke('debug-feed-link'),
+  fleetPublish: () => ipcRenderer.invoke('fleet-publish'),
+  fleetRole: () => ipcRenderer.invoke('fleet-role'),
   debugPrompt: () => ipcRenderer.invoke('debug-prompt'),
   appBuild: () => ipcRenderer.invoke('app-build'),
   debugTemplateGet: () => ipcRenderer.invoke('debug-template-get'),

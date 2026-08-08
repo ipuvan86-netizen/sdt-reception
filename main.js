@@ -3374,7 +3374,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.2';
+const APP_BUILD = '2026-08-08.3';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3518,6 +3518,111 @@ ipcMain.handle('debug-template-save', (e, p) => {
   appJournal('debug prompt template edited');
   return { ok: true };
 });
+
+// ---------------------------------------------------------------------
+// FLEET SELF-UPDATE
+//
+// Reception (the computer with the .git folder beside the app) is the
+// publisher: after a Pull + restart, the "Publish build to fleet" button
+// uploads its own program files to the builds collection in Firestore.
+// Every other computer checks that collection at startup: a newer build
+// is downloaded, EVERY file integrity-checked against the manifest, the
+// old files backed up beside the app, the new ones swapped in, and the
+// app restarts itself. The manifest is written LAST, so the fleet can
+// never act on a half-finished publish. node_modules, credentials and
+// all per-machine settings are never touched. A build whose
+// package.json changed is HELD (new components need the setup bat).
+// One attempt per published build per day - a failed swap cannot loop.
+// ---------------------------------------------------------------------
+const FLEET_FILES = ['main.js', 'renderer.js', 'preload.js', 'index.html', 'proda-engine.js', 'principle-engine.js', 'principle-capture.js', 'principle-report.js', 'telegram.js', 'package.json'];
+function sha256Of(buf) { return require('crypto').createHash('sha256').update(buf).digest('hex'); }
+function isPublisher() { try { return fs.existsSync(path.join(__dirname, '.git')); } catch (e) { return false; } }
+
+async function fleetPublish() {
+  if (!isPublisher()) return { ok: false, error: 'This computer is not the publisher (no .git folder beside the app).' };
+  try {
+    const manifest = { build: APP_BUILD, machine: MACHINE, publishedAt: new Date().toISOString(), files: {} };
+    for (const name of FLEET_FILES) {
+      const p = path.join(__dirname, name);
+      if (!fs.existsSync(p)) return { ok: false, error: name + ' is missing beside the app - publish aborted, nothing was uploaded.' };
+      const content = fs.readFileSync(p, 'utf8');
+      const hash = sha256Of(Buffer.from(content, 'utf8'));
+      manifest.files[name] = { sha256: hash, size: Buffer.byteLength(content, 'utf8') };
+      const fields = { name: { stringValue: name }, build: { stringValue: APP_BUILD }, sha256: { stringValue: hash }, content: { stringValue: content }, updatedAt: { stringValue: new Date().toISOString() } };
+      const mask = Object.keys(fields).map(f => 'updateMask.fieldPaths=' + f).join('&');
+      const r = await fetchT(FS_ROOT + '/builds/f_' + encodeURIComponent(name) + '?' + mask, {
+        method: 'PATCH', headers: { Authorization: 'Bearer ' + (await fbToken()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields }),
+      });
+      if (!r.ok) return { ok: false, error: 'upload of ' + name + ' failed (HTTP ' + r.status + ') - publish aborted; the fleet keeps the previous build.' };
+    }
+    // Manifest LAST: the fleet only ever acts on a complete publish.
+    const mf = { build: { stringValue: APP_BUILD }, machine: { stringValue: MACHINE }, publishedAt: { stringValue: manifest.publishedAt }, manifest: { stringValue: JSON.stringify(manifest) } };
+    const mmask = Object.keys(mf).map(f => 'updateMask.fieldPaths=' + f).join('&');
+    const r2 = await fetchT(FS_ROOT + '/builds/manifest?' + mmask, {
+      method: 'PATCH', headers: { Authorization: 'Bearer ' + (await fbToken()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: mf }),
+    });
+    if (!r2.ok) return { ok: false, error: 'manifest write failed (HTTP ' + r2.status + ') - the fleet keeps the previous build.' };
+    appJournal('fleet publish: build ' + APP_BUILD + ' uploaded (' + FLEET_FILES.length + ' files)');
+    return { ok: true, build: APP_BUILD, files: FLEET_FILES.length };
+  } catch (e) { return { ok: false, error: String(e).slice(0, 140) }; }
+}
+ipcMain.handle('fleet-publish', async () => await fleetPublish());
+ipcMain.handle('fleet-role', () => ({ publisher: isPublisher(), build: APP_BUILD }));
+
+function updateStatePath() { return path.join(app.getPath('userData'), 'fleet-update-state.json'); }
+
+async function fleetSelfUpdate() {
+  if (isPublisher()) return { acted: false };   // the publisher IS the source
+  try {
+    const t = await fbToken();
+    const r = await fetchT(FS_ROOT + '/builds/manifest', { headers: { Authorization: 'Bearer ' + t } });
+    if (!r.ok) return { acted: false };
+    const j = await r.json();
+    const manifest = JSON.parse((((j.fields || {}).manifest) || {}).stringValue || 'null');
+    if (!manifest || !manifest.build || manifest.build === APP_BUILD) return { acted: false };
+    let st = {};
+    try { st = JSON.parse(fs.readFileSync(updateStatePath(), 'utf8')); } catch (e) { /* first time */ }
+    if (st.tried === manifest.build && Date.now() - (st.at || 0) < 20 * 3600 * 1000) {
+      appJournal('fleet update: build ' + manifest.build + ' already attempted today - standing down (this machine still on ' + APP_BUILD + ')');
+      return { acted: false };
+    }
+    fs.writeFileSync(updateStatePath(), JSON.stringify({ tried: manifest.build, at: Date.now() }), 'utf8');
+    appJournal('fleet update: ' + APP_BUILD + ' -> ' + manifest.build + ' - downloading');
+    // Everything to memory first; every hash verified before disk is touched.
+    const incoming = {};
+    for (const name of Object.keys(manifest.files)) {
+      const fr = await fetchT(FS_ROOT + '/builds/f_' + encodeURIComponent(name), { headers: { Authorization: 'Bearer ' + (await fbToken()) } });
+      if (!fr.ok) { appJournal('fleet update ABORTED: could not download ' + name + ' (HTTP ' + fr.status + ') - next start retries'); return { acted: false }; }
+      const f = ((await fr.json()).fields) || {};
+      const content = (f.content || {}).stringValue;
+      if ((f.build || {}).stringValue !== manifest.build) { appJournal('fleet update ABORTED: ' + name + ' belongs to a different build - a publish may be mid-flight; next start retries'); return { acted: false }; }
+      if (content == null || sha256Of(Buffer.from(content, 'utf8')) !== manifest.files[name].sha256) { appJournal('fleet update ABORTED: ' + name + ' failed its integrity check - nothing was changed'); return { acted: false }; }
+      incoming[name] = content;
+    }
+    // A changed package.json means new components: hot-swapping would half-install.
+    try {
+      const localPkg = fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8');
+      if (incoming['package.json'] != null && sha256Of(Buffer.from(localPkg, 'utf8')) !== manifest.files['package.json'].sha256) {
+        appJournal('fleet update HELD: package.json changed in build ' + manifest.build + ' - run the setup bat once on this machine (new components are needed)');
+        return { acted: false, held: true };
+      }
+    } catch (e) { /* unreadable local package.json - proceed */ }
+    // Backup beside the app, then swap, then restart.
+    const bdir = path.join(__dirname, 'backup-' + APP_BUILD + '-' + localStamp());
+    try {
+      fs.mkdirSync(bdir, { recursive: true });
+      for (const name of Object.keys(incoming)) { const p = path.join(__dirname, name); if (fs.existsSync(p)) fs.copyFileSync(p, path.join(bdir, name)); }
+    } catch (e) { appJournal('fleet update: backup failed (' + String(e).slice(0, 80) + ') - continuing; the cloud still holds every published build'); }
+    for (const name of Object.keys(incoming)) fs.writeFileSync(path.join(__dirname, name), incoming[name], 'utf8');
+    appJournal('fleet update: build ' + manifest.build + ' installed - restarting now');
+    app.relaunch();
+    app.exit(0);
+    return { acted: true };
+  } catch (e) { appJournal('fleet update: check failed (' + String(e).slice(0, 90) + ') - starting normally'); return { acted: false }; }
+}
+
 async function ledgerClaim(jobId) {
   const day = localToday();
   const docId = jobId + '_' + day;
@@ -5856,7 +5961,10 @@ ipcMain.handle('log-report', () => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Fleet machines look for a newer published build BEFORE the window opens;
+  // if one installs, the app restarts itself and this line never returns.
+  try { await fleetSelfUpdate(); } catch (e) { /* start normally */ }
   createWindow(); proda.setLogger(runlog); principleReport.setLogger(runlog); maybeAutoRun();
   appJournal('app started');
   setTimeout(probePills, 20000);

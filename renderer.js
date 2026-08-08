@@ -1370,6 +1370,18 @@ const DAY_LABELS = ['S','M','T','W','T','F','S'];
 })();
 (async () => { try { const b = await window.cdbs.appBuild(); $('buildBadge').textContent = 'build ' + b.build; } catch (e) { $('buildBadge').textContent = 'build ?'; } })();
 
+(async () => { try { const fr = await window.cdbs.fleetRole(); if (fr.publisher) $('btnFleetPublish').classList.remove('hidden'); } catch (e) { /* stays hidden */ } })();
+
+$('btnFleetPublish').addEventListener('click', async () => {
+  $('debugLinkMsg').textContent = 'Uploading this build for the fleet\u2026';
+  try {
+    const r = await window.cdbs.fleetPublish();
+    $('debugLinkMsg').textContent = r.ok
+      ? ('Published build ' + r.build + ' (' + r.files + ' files). Every other computer updates itself next time it starts.')
+      : ('Publish failed: ' + r.error);
+  } catch (e) { $('debugLinkMsg').textContent = 'Publish failed - check the journal.'; }
+});
+
 $('btnEditDebugTpl').addEventListener('click', async () => {
   const r = await window.cdbs.debugTemplateGet();
   $('tplText').value = r.template;
