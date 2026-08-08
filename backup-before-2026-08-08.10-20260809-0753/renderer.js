@@ -1059,52 +1059,13 @@ async function refreshActions(fresh = true) {
     ? `<div style="background:#fdecec; color:#c0392b; border-radius:12px; padding:11px 14px; margin-bottom:10px; font-weight:600; font-size:13px;">⚠ Can't reach the shared list — showing this computer only. Items from other computers are invisible and changes here may not save.
         <button id="btnCloudRetry" style="margin-left:10px; border:none; border-radius:99px; padding:4px 13px; background:#c0392b; color:#fff; cursor:pointer; font-weight:600;">Retry</button></div>`
     : '';
-  const cfgDoc = (a.items || []).find(i => i.id === '_viewsConfig') || {};
-  const vCfg = { views: [], rules: {} };
-  try { vCfg.views = JSON.parse(cfgDoc.viewsList || '[]'); } catch (e) { /* fresh */ }
-  try { vCfg.rules = JSON.parse(cfgDoc.viewsRules || '{}'); } catch (e) { /* fresh */ }
-  window.__vCfg = vCfg;
-  if (!window.__vRestored) { window.__vRestored = true; try { window.__vWant = localStorage.getItem('sdtViewSel') || ''; } catch (e) { window.__vWant = ''; } }
-  let filt = $('fAssign').value || window.__vWant || ''; window.__vWant = '';
-  const all = (a.items || []).filter(i => i.id !== '_viewsConfig' && i.kind !== 'viewscfg');
-  const namesAll = [...new Set(all.map(i => i.assignee).filter(Boolean))].sort();
-  window.__vNames = namesAll;
-  window.__vSecs = (() => {
-    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Recalls', 'Complete notes'];
-    const found = [...new Set(all.map(i => i.section || 'CDBS'))];
-    return [...pref.filter(s => found.includes(s)), ...found.filter(s => !pref.includes(s))];
-  })();
-  // Effective audience: a hand-set chip beats the section rule; '*' is an
-  // explicit Everyone; tags naming a removed view are ignored so those
-  // items fall back to showing everywhere (nothing can silently vanish).
-  const vKnown = new Set([...vCfg.views, ...namesAll]);
-  const effTags = (i) => {
-    const m = String(i.viewsTag || '').trim();
-    if (m === '*') return [];
-    if (m) { const t = m.split(',').map(s => s.trim()).filter(s => vKnown.has(s)); return t; }
-    return (vCfg.rules[i.section || 'CDBS'] || []).filter(s => vKnown.has(s));
-  };
-  window.__vEffTags = effTags;
-  // Dentist views (a:) keep their assignment-driven behaviour: assigned
-  // items always show, tags can only ADD items, never hide assigned work.
-  // Custom views (v:) also show untagged items - the safety net.
-  const inView = (i) => {
-    if (!filt) return true;
-    const n = filt.slice(2), t = effTags(i);
-    if (filt.startsWith('a:')) return (i.assignee || '') === n || t.includes(n);
-    return t.length === 0 || t.includes(n) || (i.assignee || '') === n;
-  };
-  const vwChip = (i) => {
-    const t = effTags(i);
-    const man = String(i.viewsTag || '').trim();
-    const lab = t.length ? esc(t[0]) + (t.length > 1 ? ' +' + (t.length - 1) : '') : 'Everyone';
-    return `<span class="chip" data-vwchip="${i.id}" title="Who sees this item — click to change${man ? '' : ' (following the section rule)'}" style="cursor:pointer;${man ? 'border:1px solid #b6b6bb;' : ''}">👁 ${lab}</span>`;
-  };
+  const filt = $('fAssign').value;
+  const all = a.items || [];
   const todayIso = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();   // LOCAL date, not UTC
   // Scheduled items (a due date in the future) stay hidden until their
   // day arrives — a weekly VAC test surfaces each Monday, not all week.
-  let open = all.filter(i => !i.doneAt && !(i.due && i.due > todayIso) && inView(i));
-  const sched = all.filter(i => !i.doneAt && i.due && i.due > todayIso && inView(i))
+  let open = all.filter(i => !i.doneAt && !(i.due && i.due > todayIso) && (!filt || (i.assignee || '') === filt));
+  const sched = all.filter(i => !i.doneAt && i.due && i.due > todayIso && (!filt || (i.assignee || '') === filt))
     .sort((a, b) => String(a.due).localeCompare(String(b.due)));
   window.__schOpen = window.__schOpen || {};
   const done = all.filter(i => i.doneAt && (Date.now() - Date.parse(i.doneAt)) < ((i.kind === 'unpaid' ? 60 : 14) * 86400000));
@@ -1117,13 +1078,9 @@ async function refreshActions(fresh = true) {
     badge.className = 'pill warnpill'; badge.textContent = open.length + ' waiting';
     if (cardEl) cardEl.style.borderLeftColor = '#e2a93b';
   }
-  // View dropdown: Everyone, then custom views, then dentists (assignees)
-  const names = namesAll;
-  $('fAssign').innerHTML = '<option value="">View: Everyone</option>'
-    + vCfg.views.map(v => `<option value="v:${esc(v)}"${('v:' + v) === filt ? ' selected' : ''}>${esc(v)}</option>`).join('')
-    + names.map(n => `<option value="a:${esc(n)}"${('a:' + n) === filt ? ' selected' : ''}>${esc(n)}</option>`).join('');
-  if ($('fAssign').value !== filt) { $('fAssign').value = ''; filt = ''; }
-  renderViewsBox(vCfg, names);
+  // assignee filter options (preserved selection)
+  const names = [...new Set(all.map(i => i.assignee).filter(Boolean))].sort();
+  $('fAssign').innerHTML = '<option value="">Everyone</option>' + names.map(n => `<option${n === filt ? ' selected' : ''}>${esc(n)}</option>`).join('');
 
   const today = new Date().toISOString().slice(0, 10);
   const stagePills = (i) => `
@@ -1148,7 +1105,6 @@ async function refreshActions(fresh = true) {
       <div style="flex:1;">
         <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong>${i.text ? ' <span style="color:#3c3c43;">— ' + esc(i.text) + '</span>' : ''}
           ${i.assignee ? `<span class="chip">${esc(i.assignee)}</span>` : ''}
-          ${vwChip(i)}
           ${i.repeat ? `<span class="chip" title="repeats ${esc(i.repeat)}">↻</span>` : ''}
           ${twoStage && !i.stageDentist ? '<span class="chip" style="background:#fff4e0; color:#9a6b00;">needs dentist</span>' : ''}
           ${i.howTo ? `<a href="#" data-howto="${esc(i.howTo)}" class="chip" style="background:#eef2ff; color:#5e5ce6; text-decoration:none;">How to ↗</a>` : ''}</div>
@@ -1168,7 +1124,7 @@ async function refreshActions(fresh = true) {
   const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook'];   // urgent first, dentist sections last
   const parkedAll = open.filter(i => i.parked);
   open = open.filter(i => !i.parked);
-  const doneF = done.filter(inView);
+  const doneF = done.filter(i => !filt || (i.assignee || '') === filt);
   const found = [...new Set([...open, ...sched, ...doneF, ...parkedAll].map(i => i.section || 'CDBS'))];
   const sections = [...preferred.filter(s => found.includes(s)), ...found.filter(s => !preferred.includes(s))];
   const bySection = s => open.filter(i => (i.section || 'CDBS') === s);
@@ -1327,8 +1283,6 @@ async function refreshActions(fresh = true) {
     }
     const how = e.target.closest('a[data-howto]');
     if (how) { e.preventDefault(); window.cdbs.openExternal(how.getAttribute('data-howto')); return; }
-    const vwc = e.target.closest('span[data-vwchip]');
-    if (vwc) { e.preventDefault(); openViewsEditor(vwc.getAttribute('data-vwchip')); return; }
     const del = e.target.closest('button[data-del]');
     if (del) {
       if (!confirm('Delete this item completely? It will not come back unless a future run re-finds it.')) return;
@@ -1392,108 +1346,7 @@ function showView(which) {
 $('navHome').addEventListener('click', () => showView('home'));
 $('navCdbs').addEventListener('click', () => showView('cdbs'));
 
-$('fAssign').addEventListener('change', () => {
-  try { localStorage.setItem('sdtViewSel', $('fAssign').value || ''); } catch (e) { /* fine */ }
-  refreshActions();
-});
-
-// ---------- Views: per-item audience editor ----------
-async function openViewsEditor(id) {
-  const a = await window.cdbs.actionGet();
-  const it = (a.items || []).find(x => x.id === id);
-  if (!it) return;
-  const vCfg = window.__vCfg || { views: [], rules: {} };
-  const opts = [...vCfg.views, ...(window.__vNames || []).filter(n => !vCfg.views.includes(n))];
-  const man = String(it.viewsTag || '').trim();
-  const manual = man && man !== '*' ? man.split(',').map(s => s.trim()) : [];
-  const ruleT = (vCfg.rules[it.section || 'CDBS'] || []);
-  const sel = man ? manual : ruleT;
-  const old = document.getElementById('vwOverlay'); if (old) old.remove();
-  const od = document.createElement('div');
-  od.id = 'vwOverlay';
-  od.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;display:flex;align-items:center;justify-content:center;';
-  od.innerHTML = `<div style="background:#fff;border-radius:16px;padding:18px;max-width:340px;width:92%;max-height:72%;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.2);">
-    <div style="font-weight:700;margin-bottom:4px;">Who sees this item</div>
-    <div class="muted" style="font-size:12px;margin-bottom:10px;">${esc(it.name)}${man ? '' : ' — currently following the section rule'}</div>
-    ${opts.length ? opts.map(o => `<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:13.5px;"><input type="checkbox" data-vwopt="${esc(o)}" ${sel.includes(o) ? 'checked' : ''} style="width:17px;height:17px;"> ${esc(o)}</label>`).join('') : '<div class="muted">No views yet — add some in Advanced tools → Views.</div>'}
-    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-      <button id="vwSaveBtn">Save</button>
-      <button id="vwRuleBtn" class="secondary">Use section rule</button>
-      <button id="vwCancelBtn" class="secondary">Cancel</button>
-    </div>
-    <div class="muted" style="margin-top:9px;font-size:11.5px;">No boxes ticked = Everyone. The assigned dentist always sees their items regardless of tags.</div>
-  </div>`;
-  document.body.appendChild(od);
-  od.addEventListener('click', (e) => { if (e.target === od) od.remove(); });
-  document.getElementById('vwCancelBtn').onclick = () => od.remove();
-  document.getElementById('vwRuleBtn').onclick = async () => {
-    await window.cdbs.actionViewsTag({ id, tag: '' });
-    od.remove(); refreshActions(true);
-  };
-  document.getElementById('vwSaveBtn').onclick = async () => {
-    const picked = [...od.querySelectorAll('input[data-vwopt]')].filter(c => c.checked).map(c => c.getAttribute('data-vwopt'));
-    await window.cdbs.actionViewsTag({ id, tag: picked.length ? picked.join(',') : '*' });
-    od.remove(); refreshActions(true);
-  };
-}
-
-// ---------- Views: manage views + section rules (Advanced tools) ----------
-let __vSaveTimer = null;
-function saveViewsCfg(vCfg) {
-  clearTimeout(__vSaveTimer);
-  __vSaveTimer = setTimeout(async () => {
-    await window.cdbs.viewsConfigSet({ views: vCfg.views, rules: vCfg.rules });
-    refreshActions(true);
-  }, 400);
-}
-function renderViewsBox(vCfg, names) {
-  const listEl = document.getElementById('vwList'), rulesEl = document.getElementById('vwRules');
-  if (!listEl || !rulesEl) return;
-  const sig = JSON.stringify([vCfg.views, vCfg.rules, names, window.__vSecs || []]);
-  if (listEl.dataset.sig === sig) return;                     // nothing changed - keep any half-typed input
-  listEl.dataset.sig = sig;
-  listEl.innerHTML = vCfg.views.length
-    ? vCfg.views.map(v => `<span class="chip" style="font-size:13px;padding:6px 12px;">${esc(v)} <a href="#" data-vwdel="${esc(v)}" style="color:#c0392b;text-decoration:none;margin-left:4px;" title="Remove this view — its items fall back to showing everywhere">✕</a></span>`).join(' ')
-    : '<span class="muted">No views yet — add Reception, Nurse, or anything you like.</span>';
-  const secs = window.__vSecs || [];
-  const opts = [...vCfg.views, ...names.filter(n => !vCfg.views.includes(n))];
-  rulesEl.innerHTML = secs.map(s => {
-    const cur = vCfg.rules[s] || [];
-    return `<div class="row" style="padding:7px 0;border-bottom:1px solid #f5f5f7;align-items:center;flex-wrap:wrap;">
-      <span style="min-width:170px;font-weight:600;font-size:13px;">${esc(s)}</span>
-      ${opts.map(o => `<span class="chip" data-vwrule="${esc(s)}::${esc(o)}" style="cursor:pointer;font-size:12px;${cur.includes(o) ? 'background:#e6f4ec;color:#1d7a46;font-weight:700;' : ''}">${esc(o)}</span>`).join('')}
-      ${cur.length ? '' : '<span class="muted" style="font-size:11.5px;">everyone</span>'}
-    </div>`;
-  }).join('') || '<div class="muted">Sections appear here once the list has items.</div>';
-  listEl.querySelectorAll('a[data-vwdel]').forEach(el => el.onclick = (e) => {
-    e.preventDefault();
-    const v = el.getAttribute('data-vwdel');
-    if (!confirm('Remove the view "' + v + '"? Items tagged only to it will show in every view again.')) return;
-    vCfg.views = vCfg.views.filter(x => x !== v);
-    for (const s of Object.keys(vCfg.rules)) vCfg.rules[s] = (vCfg.rules[s] || []).filter(x => x !== v);
-    saveViewsCfg(vCfg);
-  });
-  rulesEl.querySelectorAll('span[data-vwrule]').forEach(el => el.onclick = () => {
-    const [s, o] = el.getAttribute('data-vwrule').split('::');
-    const cur = vCfg.rules[s] || [];
-    vCfg.rules[s] = cur.includes(o) ? cur.filter(x => x !== o) : [...cur, o];
-    if (!vCfg.rules[s].length) delete vCfg.rules[s];
-    saveViewsCfg(vCfg);
-  });
-}
-(() => {
-  const btn = document.getElementById('btnVwAdd'), inp = document.getElementById('vwNew');
-  if (!btn || !inp) return;
-  const add = () => {
-    const v = (inp.value || '').trim().slice(0, 40);
-    if (!v) return;
-    const vCfg = window.__vCfg || { views: [], rules: {} };
-    if (!vCfg.views.includes(v)) { vCfg.views.push(v); saveViewsCfg(vCfg); }
-    inp.value = '';
-  };
-  btn.addEventListener('click', add);
-  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
-})();
+$('fAssign').addEventListener('change', () => refreshActions());
 
 
 // ---------- Auto Reports ----------

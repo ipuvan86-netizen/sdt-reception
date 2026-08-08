@@ -32,8 +32,6 @@ contextBridge.exposeInMainWorld('cdbs', {
   actionAdd: (p) => ipcRenderer.invoke('action-add', p),
   actionStage: (p) => ipcRenderer.invoke('action-stage', p),
   actionNote: (p) => ipcRenderer.invoke('action-note', p),
-  actionViewsTag: (p) => ipcRenderer.invoke('action-views-tag', p),
-  viewsConfigSet: (p) => ipcRenderer.invoke('views-config-set', p),
   actionDue: (p) => ipcRenderer.invoke('action-due', p),
   reactOutcome: (p) => ipcRenderer.invoke('react-outcome', p),
   reactWriteNote: (p) => ipcRenderer.invoke('react-write-note', p),

@@ -162,7 +162,7 @@
       </details>
     </div>
     <div class="row" style="margin-top:8px;">
-      <span class="muted">View:</span><select id="fAssign" style="font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:6px;"><option value="">Everyone</option></select>
+      <span class="muted">Show:</span><select id="fAssign" style="font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:6px;"><option value="">Everyone</option></select>
     </div>
     <div class="row hidden" id="routineForm" style="margin-top:10px; background:#f4f4f8; border-radius:12px; padding:10px;">
       <input type="text" id="rName" placeholder="Routine task… (e.g. Steriliser log)" style="flex:2; min-width:170px;">
@@ -358,22 +358,6 @@
 <div id="viewCdbs" class="hidden">
   <details id="advancedTools">
     <summary>Advanced tools</summary>
-  <div class="card" id="cardViews">
-    <div style="font-weight:600; font-size:16px;">Views — who sees what on the Action list</div>
-    <div class="muted" style="margin-top:4px;">
-      Make views like <strong>Reception</strong> or <strong>Nurse</strong>, then set a rule per section
-      (e.g. Checkouts → Reception). Rules cover the whole backlog and everything the automations add;
-      the little 👁 chip on any item overrides its rule. Untagged items show in <strong>every</strong> view,
-      and a dentist always sees everything assigned to them — tags can only add, never hide.
-    </div>
-    <div class="row" style="margin-top:12px; gap:8px; align-items:center; flex-wrap:wrap;">
-      <input type="text" id="vwNew" placeholder="new view name (e.g. Nurse)" style="min-width:220px;">
-      <button class="secondary" id="btnVwAdd" style="padding:7px 16px;">Add view</button>
-    </div>
-    <div id="vwList" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"></div>
-    <div style="font-weight:600; font-size:13.5px; margin-top:14px;">Section rules</div>
-    <div id="vwRules" style="margin-top:4px;"></div>
-  </div>
   <div class="card">
     <div style="font-weight:600; font-size:16px;">Debug log link (for Claude)</div>
     <div class="muted" style="margin-top:4px;">
