@@ -3382,7 +3382,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.4';
+const APP_BUILD = '2026-08-08.5';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3546,13 +3546,24 @@ const FLEET_FILES = ['main.js', 'renderer.js', 'preload.js', 'index.html', 'prod
 function sha256Of(buf) { return require('crypto').createHash('sha256').update(buf).digest('hex'); }
 function isPublisher() { try { return fs.existsSync(path.join(__dirname, '.git')); } catch (e) { return false; } }
 
+// True only when candidate is strictly NEWER than current (YYYY-MM-DD.N).
+// Anything unparseable is never installed - the fleet must not downgrade
+// or install a build it cannot reason about.
+function buildNewerThan(candidate, current) {
+  const parse = (s) => { const m = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/.exec(String(s || '').trim()); return m ? [m[1], parseInt(m[2], 10)] : null; };
+  const a = parse(candidate), b = parse(current);
+  if (!a || !b) return false;
+  return a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
+}
+
 async function fleetPublish() {
   if (!isPublisher()) return { ok: false, error: 'This computer is not the publisher (no .git folder beside the app).' };
+  const failed = (error) => { appJournal('fleet publish FAILED: ' + error); return { ok: false, error }; };
   try {
     const manifest = { build: APP_BUILD, machine: MACHINE, publishedAt: new Date().toISOString(), files: {} };
     for (const name of FLEET_FILES) {
       const p = path.join(__dirname, name);
-      if (!fs.existsSync(p)) return { ok: false, error: name + ' is missing beside the app - publish aborted, nothing was uploaded.' };
+      if (!fs.existsSync(p)) return failed(name + ' is missing beside the app - publish aborted, nothing was uploaded.');
       const content = fs.readFileSync(p, 'utf8');
       const hash = sha256Of(Buffer.from(content, 'utf8'));
       manifest.files[name] = { sha256: hash, size: Buffer.byteLength(content, 'utf8') };
@@ -3562,7 +3573,7 @@ async function fleetPublish() {
         method: 'PATCH', headers: { Authorization: 'Bearer ' + (await fbToken()), 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields }),
       });
-      if (!r.ok) return { ok: false, error: 'upload of ' + name + ' failed (HTTP ' + r.status + ') - publish aborted; the fleet keeps the previous build.' };
+      if (!r.ok) return failed('upload of ' + name + ' failed (HTTP ' + r.status + ') - publish aborted; the fleet keeps the previous build.');
     }
     // Manifest LAST: the fleet only ever acts on a complete publish.
     const mf = { build: { stringValue: APP_BUILD }, machine: { stringValue: MACHINE }, publishedAt: { stringValue: manifest.publishedAt }, manifest: { stringValue: JSON.stringify(manifest) } };
@@ -3571,10 +3582,10 @@ async function fleetPublish() {
       method: 'PATCH', headers: { Authorization: 'Bearer ' + (await fbToken()), 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields: mf }),
     });
-    if (!r2.ok) return { ok: false, error: 'manifest write failed (HTTP ' + r2.status + ') - the fleet keeps the previous build.' };
+    if (!r2.ok) return failed('manifest write failed (HTTP ' + r2.status + ') - the fleet keeps the previous build.');
     appJournal('fleet publish: build ' + APP_BUILD + ' uploaded (' + FLEET_FILES.length + ' files)');
     return { ok: true, build: APP_BUILD, files: FLEET_FILES.length };
-  } catch (e) { return { ok: false, error: String(e).slice(0, 140) }; }
+  } catch (e) { return failed(String(e).slice(0, 140)); }
 }
 ipcMain.handle('fleet-publish', async () => await fleetPublish());
 ipcMain.handle('fleet-role', () => ({ publisher: isPublisher(), build: APP_BUILD }));
@@ -3590,6 +3601,10 @@ async function fleetSelfUpdate() {
     const j = await r.json();
     const manifest = JSON.parse((((j.fields || {}).manifest) || {}).stringValue || 'null');
     if (!manifest || !manifest.build || manifest.build === APP_BUILD) return { acted: false };
+    if (!buildNewerThan(manifest.build, APP_BUILD)) {
+      appJournal('fleet update: cloud holds build ' + manifest.build + ' which is not newer than this machine (' + APP_BUILD + ') - standing down');
+      return { acted: false };
+    }
     let st = {};
     try { st = JSON.parse(fs.readFileSync(updateStatePath(), 'utf8')); } catch (e) { /* first time */ }
     if (st.tried === manifest.build && Date.now() - (st.at || 0) < 20 * 3600 * 1000) {
