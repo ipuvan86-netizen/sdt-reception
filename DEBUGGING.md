@@ -9,7 +9,7 @@ Each machine running SDT Reception publishes its current day's log (journal + ru
 ## Machines
 
 - HOME (DESKTOP-GA2C9NI): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/fbb4e4ade083a796fb6d85a32071e6887d71_DESKTOP-GA2C9NI_log
-- RECEPTION: (paste link here)
+- RECEPTION (Scannercomp): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/235851fd669ef1cd42eb14c3cf3ef6dc5e65_Scannercomp_log
 - ROOM: (paste link here)
 
 ## Notes
