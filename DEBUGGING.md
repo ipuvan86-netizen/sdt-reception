@@ -10,7 +10,8 @@ Each machine running SDT Reception publishes its current day's log (journal + ru
 
 - HOME (DESKTOP-GA2C9NI): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/fbb4e4ade083a796fb6d85a32071e6887d71_DESKTOP-GA2C9NI_log
 - RECEPTION (Reception): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/235851fd669ef1cd42eb14c3cf3ef6dc5e65_Reception_log
-- ROOM (MSI): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/d21e2c43be3c6ad2a9f2ba263ce28817fa72_MSI_log
+- ROOM 1 (MSI): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/d21e2c43be3c6ad2a9f2ba263ce28817fa72_MSI_log
+- ROOM 2 (sdts2): https://firestore.googleapis.com/v1/projects/inv-c20f7/databases/(default)/documents/debugLogs/1d09ce0298c23a5e464aa4eb86d9231054dc_sdts2_log
 
 ## Notes
 
