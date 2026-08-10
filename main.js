@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-10.2';
+const APP_BUILD = '2026-08-10.3';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3761,7 +3761,7 @@ ipcMain.handle('fleet-lastruns', async () => {
 ipcMain.handle('run-history', async () => {
   const runs = await fleetRuns();
   const cut = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
-  const hist = runs.filter(r => r.jobId === 'runall' && r.day >= cut)
+  const hist = runs.filter(r => (r.jobId === 'runall' || r.jobId === 'runall-sms') && r.day >= cut)
     .sort((a, b) => (b.at || b.day).localeCompare(a.at || a.day));
   return { hist };
 });
@@ -5714,15 +5714,22 @@ async function runAllCore(how, group) {
   const jobs = (s.jobs || []).filter(j => j.enabled && (j.group || 'reports') === group);
   const withMorning = group === 'reports' && !!ms.enabled;
   const results = [];
-  appJournal(LBL + ' (' + how + '): ' + (jobs.length + (withMorning ? 1 : 0)) + ' job(s)');
+  // Live headline for the strip under the RUN ALL button of this group's tab.
+  const live = (text, done) => { try { sendUi('runall-live', { group, text: String(text || ''), done: !!done }); } catch (e) { /* UI is optional */ } };
+  const total = jobs.length + (withMorning ? 1 : 0);
+  appJournal(LBL + ' (' + how + '): ' + total + ' job(s)');
+  live(LBL + ' started (' + how + '): ' + total + ' job(s)\u2026');
   let prodaWarm = null;
   if (withMorning) {
     appJournal('run all: asking for the PRODA code up front (desk box + Telegram - first answer wins)');
     prodaWarm = ensureProdaLoggedIn((t) => beat('Run all - PRODA warm-up: ' + t)).catch(() => ({ ok: false }));
   }
+  let jobNo = 0;
   for (const j of jobs) {
     try {
+      jobNo++;
       beat('Run all: ' + j.name);
+      live('Running ' + jobNo + ' of ' + total + ': ' + j.name + '\u2026');
       const r = await runAutoJob(j.id);
       results.push({ name: j.name, outcome: (r && r.outcome) || 'done' });
       appJournal('run all - "' + j.name + '": ' + ((r && r.outcome) || 'done'));
@@ -5734,6 +5741,7 @@ async function runAllCore(how, group) {
   if (withMorning) {
     if (prodaWarm) { beat('Run all: waiting for the PRODA warm-up to finish'); await prodaWarm; }
     beat('Run all: 14-day CDBS morning run (desk mode)');
+    live('Running ' + total + ' of ' + total + ': 14-day CDBS morning run \u2014 detailed progress in the Morning run card below\u2026');
     morningState = { running: true, stopRequested: false };
     try {
       try { await morningRun('desk'); } catch (eM) {
@@ -5766,6 +5774,10 @@ async function runAllCore(how, group) {
     const mres = results.find(r2 => r2.name === '14-day CDBS morning run');
     if (mres) await ledgerReport('cdbs-14day', '14-day CDBS morning run', mres.outcome);
   } catch (e5) { /* history is best-effort */ }
+  try {
+    const bad = results.filter(r2 => /fail|error|skipped|aborted|not successful|stopped/i.test(r2.outcome)).length;
+    live('Finished ' + new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) + ' \u2014 ' + results.length + ' job(s)' + (bad ? ', ' + bad + ' \u26a0' : ', all \u2713'), true);
+  } catch (eL) { /* cosmetic */ }
   appJournal(LBL + ' finished (' + how + ')');
   autoRunAllBusy = false;
 }

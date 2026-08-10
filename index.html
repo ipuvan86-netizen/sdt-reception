@@ -227,20 +227,11 @@
       </div>
       <div id="histBody"></div>
     </div>
-  <div class="card">
-    <div class="cardTitle">Auto Reports</div>
-    <div class="row" style="margin-top:12px; background:#eaf3ee; border:2px solid #2F6B4F; border-radius:14px; padding:14px;">
-      <button class="primary" id="btnRunAllJobs" style="font-size:16px; padding:12px 26px;">▶ RUN ALL REPORTS</button>
-      <label style="font-size:12.5px; white-space:nowrap;"><input type="checkbox" id="runAllSchedOn"> every day at</label>
-      <input type="text" id="runAllTime" value="08:30" style="width:64px; text-align:center; font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;">
-      <button class="secondary" id="btnRunAllSchedSave" style="padding:6px 14px;">Save</button>
-      <button class="secondary" id="btnRunHistory" style="padding:6px 14px;">History</button>
-      <div style="flex:1; font-size:12.5px; color:#3c3c43;">The whole morning as one run: every report with its toggle <strong>ON</strong>, in order, finishing with the 14-day CDBS morning run (desk mode). Reports that <strong>text patients</strong> are NOT in this run — they live in their own section below, on their own clock. A one-page summary lands on Telegram when it finishes. <strong>The PRODA code is asked for straight away</strong> — type it into the box here <em>or</em> reply on Telegram, whichever is quicker — so nothing waits later. Nothing double-sends: every job remembers what it has already done.</div>
-    </div>
-    <div class="muted" style="margin-top:6px;">Background jobs that run a Principle report on a schedule and feed the Action list. No PRODA involved — a PRODA problem can never stop these.</div>
-    <div id="autoTable" style="margin-top:14px;"></div>
+  <div class="row" style="margin-bottom:14px;">
+    <button class="primary" id="tabBtnReports" style="font-size:15px; padding:10px 22px;">Auto Reports — Action Lists</button>
+    <button class="secondary" id="tabBtnSms" style="font-size:15px; padding:10px 22px;">Auto Reports with SMS</button>
   </div>
-
+  <div id="tabSms" class="hidden">
   <div class="card">
     <div class="cardTitle">Auto Reports with SMS</div>
     <div class="row" style="margin-top:12px; background:#eaf0f7; border:2px solid #2F4F6B; border-radius:14px; padding:14px;">
@@ -250,9 +241,27 @@
       <button class="secondary" id="btnSmsRunAllSchedSave" style="padding:6px 14px;">Save</button>
       <div style="flex:1; font-size:12.5px; color:#3c3c43;">Every report that <strong>texts patients</strong> lives here, on its own clock — so messages land at a civilised hour instead of first thing with the morning reports. The toggles decide what is in the run. Nothing double-sends: every job remembers who it has already texted.</div>
     </div>
+    <div id="raLiveSms" class="muted" style="margin-top:8px; font-size:13px;">No run recorded yet.</div>
     <div class="muted" style="margin-top:6px;">SMS-capable jobs. No PRODA involved — a PRODA problem can never stop these.</div>
     <div id="autoTableSms" style="margin-top:14px;"></div>
   </div>
+  </div>
+  <div id="tabReports">
+  <div class="card">
+    <div class="cardTitle">Auto Reports — Action Lists</div>
+    <div class="row" style="margin-top:12px; background:#eaf3ee; border:2px solid #2F6B4F; border-radius:14px; padding:14px;">
+      <button class="primary" id="btnRunAllJobs" style="font-size:16px; padding:12px 26px;">▶ RUN ALL REPORTS</button>
+      <label style="font-size:12.5px; white-space:nowrap;"><input type="checkbox" id="runAllSchedOn"> every day at</label>
+      <input type="text" id="runAllTime" value="08:30" style="width:64px; text-align:center; font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;">
+      <button class="secondary" id="btnRunAllSchedSave" style="padding:6px 14px;">Save</button>
+      <button class="secondary" id="btnRunHistory" style="padding:6px 14px;">History</button>
+      <div style="flex:1; font-size:12.5px; color:#3c3c43;">The whole morning as one run: every report with its toggle <strong>ON</strong>, in order, finishing with the 14-day CDBS morning run (desk mode). Reports that <strong>text patients</strong> are NOT in this run — they live in their own section below, on their own clock. A one-page summary lands on Telegram when it finishes. <strong>The PRODA code is asked for straight away</strong> — type it into the box here <em>or</em> reply on Telegram, whichever is quicker — so nothing waits later. Nothing double-sends: every job remembers what it has already done.</div>
+    </div>
+    <div id="raLiveReports" class="muted" style="margin-top:8px; font-size:13px;">No run recorded yet.</div>
+    <div class="muted" style="margin-top:6px;">Background jobs that run a Principle report on a schedule and feed the Action list. No PRODA involved — a PRODA problem can never stop these.</div>
+    <div id="autoTable" style="margin-top:14px;"></div>
+  </div>
+
 
   <div class="card" id="cardRunAll" style="border-color: var(--accent); border-width: 2px;">
     <div class="row">
@@ -365,6 +374,7 @@
       <button class="secondary" id="btnResults">Open results file</button>
       <button class="secondary" id="btnAgain">Start another</button>
     </div>
+  </div>
   </div>
 </div>
 

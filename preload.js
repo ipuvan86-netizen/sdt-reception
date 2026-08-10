@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('cdbs', {
   runAll: () => ipcRenderer.invoke('run-all'),
   stopAll: () => ipcRenderer.invoke('stop-all'),
   onRunAllProgress: (cb) => ipcRenderer.on('runall-progress', (e, d) => cb(d)),
+  onRunallLive: (cb) => ipcRenderer.on('runall-live', (e, d) => cb(d)),
   onRunAllFinished: (cb) => ipcRenderer.on('runall-finished', (e, d) => cb(d)),
   morningGetSettings: () => ipcRenderer.invoke('morning-get-settings'),
   morningSaveSettings: (u) => ipcRenderer.invoke('morning-save-settings', u),

@@ -1544,6 +1544,21 @@ function showView2(which) {
   }
 }
 $('navHome').addEventListener('click', () => showView2('viewHome'));
+function showAutoTab(which) {
+  $('tabReports').classList.toggle('hidden', which !== 'reports');
+  $('tabSms').classList.toggle('hidden', which !== 'sms');
+  $('tabBtnReports').className = which === 'reports' ? 'primary' : 'secondary';
+  $('tabBtnSms').className = which === 'sms' ? 'primary' : 'secondary';
+}
+$('tabBtnReports').addEventListener('click', () => showAutoTab('reports'));
+$('tabBtnSms').addEventListener('click', () => showAutoTab('sms'));
+window.cdbs.onRunallLive((p) => {
+  const el = p && p.group === 'sms' ? $('raLiveSms') : $('raLiveReports');
+  if (!el) return;
+  el.textContent = p.text || '';
+  el.dataset.running = p.done ? '' : '1';
+  if (p.done) setTimeout(refreshAuto, 2500);
+});
 $('navAuto').addEventListener('click', () => { showView2('viewAuto'); refreshAuto(); });
 $('navCdbs').addEventListener('click', () => showView2('viewCdbs'));
 
@@ -1708,6 +1723,18 @@ async function refreshAuto() {
   const allJobs = r.jobs || [];
   $('autoTable').innerHTML = allJobs.filter(j => (j.group || 'reports') !== 'sms').map(jobCard).join('') || '<div class="muted">No jobs yet.</div>';
   $('autoTableSms').innerHTML = allJobs.filter(j => (j.group || 'reports') === 'sms').map(jobCard).join('') || '<div class="muted">No SMS jobs yet.</div>';
+  // Idle strips show the last recorded run (fleet-wide) - never overwrite a live run.
+  const paintIdle = (id, key) => {
+    const el = $(id);
+    if (!el || el.dataset.running === '1') return;
+    const fl = (__fleet.byJob || {})[key];
+    if (!fl) { el.textContent = 'No run recorded yet.'; return; }
+    const lines = (fl.outcome || '').split('\n').filter(Boolean);
+    const bad = lines.filter(l => /^\u26a0/.test(l)).length;
+    el.textContent = 'Last run: ' + new Date(fl.at || fl.day).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' on ' + (fl.machine || '?') + ' \u2014 ' + lines.length + ' job(s)' + (bad ? ', ' + bad + ' \u26a0' : ', all \u2713');
+  };
+  paintIdle('raLiveReports', 'runall');
+  paintIdle('raLiveSms', 'runall-sms');
 
   for (const b of document.querySelectorAll('button[data-savejob]')) {
     b.addEventListener('click', async () => {
