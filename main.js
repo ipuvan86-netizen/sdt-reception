@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-10.4';
+const APP_BUILD = '2026-08-10.5';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4993,23 +4993,26 @@ async function runHuddleTagJob(job) {
     runlog('  "' + it.name + '" auto-cleared: huddle tag added in Principle');
   }
   if (cleared > 60) appJournal('Huddle tags: unusually large auto-clear (' + cleared + ' items) - if that looks wrong, check the report and use undo in Done');
-  // First-run default audience: this is practitioners' work, so seed the
-  // section rule to practitioner views only (Reception's view stays clean).
-  // Seeds ONLY while no rule exists - the audience picker stays the boss.
+  // Audience: NO section rule and no tags - exactly like Complete notes.
+  // Dentist views filter on assignee (each practitioner sees only their
+  // own), and the safety net shows the section in custom views. A section
+  // rule here once leaked every practitioner's items into every dentist
+  // view (tags can only ADD to a dentist view) - the migration below
+  // removes that rule wherever it still exists. Runs harmlessly forever:
+  // it only acts when the exact bad rule is present.
   try {
-    let cfg = a.items.find(x => x.id === '_viewsConfig');
-    const rules = cfg && cfg.viewsRules ? JSON.parse(cfg.viewsRules) : {};
-    if (!rules['Huddle tags']) {
-      const pracs = [...new Set(rows.map(o => ((pracKey && o[pracKey]) || '').trim()).filter(Boolean))].slice(0, 30);
-      if (pracs.length) {
-        if (!cfg) { cfg = { id: '_viewsConfig', kind: 'viewscfg', name: 'Views configuration', createdAt: now, viewsList: '[]' }; a.items.push(cfg); }
-        rules['Huddle tags'] = pracs;
+    const cfg = a.items.find(x => x.id === '_viewsConfig');
+    if (cfg && cfg.viewsRules) {
+      const rules = JSON.parse(cfg.viewsRules);
+      if (rules['Huddle tags']) {
+        delete rules['Huddle tags'];
         cfg.viewsRules = JSON.stringify(rules);
         await fsPush(cfg);
-        runlog('views: seeded "Huddle tags" audience -> ' + pracs.join(', '));
+        runlog('views: removed the "Huddle tags" section rule (assignee filtering does the work, like Complete notes)');
+        appJournal('Huddle tags: section audience rule removed - practitioner views now show only their own items');
       }
     }
-  } catch (eV) { runlog('views seed skipped: ' + ((eV && eV.message) || eV)); }
+  } catch (eV) { runlog('views rule cleanup skipped: ' + ((eV && eV.message) || eV)); }
   saveActions(a);
   runlog('huddle tags: ' + added + ' item(s) added' + (cleared ? ', ' + cleared + ' auto-cleared' : ''));
   sendUi('actions-changed', {});
