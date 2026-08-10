@@ -1553,6 +1553,8 @@ const DAY_LABELS = ['S','M','T','W','T','F','S'];
     const s = await window.cdbs.autoGet();
     $('runAllSchedOn').checked = !!s.runAllEnabled;
     $('runAllTime').value = s.runAllTime || '08:30';
+    $('smsRunAllSchedOn').checked = !!s.smsRunAllEnabled;
+    $('smsRunAllTime').value = s.smsRunAllTime || '10:45';
   } catch (e) { /* first paint */ }
 })();
 (async () => { try { const b = await window.cdbs.appBuild(); $('buildBadge').textContent = 'build ' + b.build; } catch (e) { $('buildBadge').textContent = 'build ?'; } })();
@@ -1630,9 +1632,14 @@ $('btnRunHistory').addEventListener('click', async () => {
 $('btnHistClose').addEventListener('click', () => { $('histPanel').style.display = 'none'; });
 
 $('btnRunAllSchedSave').addEventListener('click', async () => {
-  const r = await window.cdbs.runallSched({ enabled: $('runAllSchedOn').checked, time: $('runAllTime').value });
+  const r = await window.cdbs.runallSched({ group: 'reports', enabled: $('runAllSchedOn').checked, time: $('runAllTime').value });
   $('runAllTime').value = r.time;
-  alert(r.enabled ? ('Daily RUN ALL scheduled for ' + r.time + ' (every day). Per-report times are retired - the toggles decide what is in the run.') : 'Daily RUN ALL schedule turned OFF - press the button when you want it.');
+  alert(r.enabled ? ('Daily RUN ALL REPORTS scheduled for ' + r.time + ' (every day). The toggles decide what is in the run; SMS jobs run on their own clock below.') : 'Daily RUN ALL REPORTS schedule turned OFF - press the button when you want it.');
+});
+$('btnSmsRunAllSchedSave').addEventListener('click', async () => {
+  const r = await window.cdbs.runallSched({ group: 'sms', enabled: $('smsRunAllSchedOn').checked, time: $('smsRunAllTime').value });
+  $('smsRunAllTime').value = r.time;
+  alert(r.enabled ? ('Daily RUN ALL SMS scheduled for ' + r.time + ' (every day). The toggles decide which texting jobs are in it.') : 'Daily RUN ALL SMS schedule turned OFF - press the button when you want it.');
 });
 $('btnRunAllJobs').addEventListener('click', async () => {
   const fl = (__fleet.byJob || {})['runall'];
@@ -1641,9 +1648,21 @@ $('btnRunAllJobs').addEventListener('click', async () => {
     ? 'ALREADY RAN TODAY at ' + new Date(fl.at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) + ' on ' + fl.machine + '.\n\nEvery job remembers what it already did (texts cannot repeat), so running again is safe but slow. Run again anyway?'
     : 'Run every switched-ON report now, ending with the 14-day CDBS morning run (desk mode)?\n\nThe PRODA code will be asked for straight away - type it in the app or reply on Telegram, whichever is quicker. Nothing double-sends.';
   if (!confirm(warn)) return;
-  const r = await window.cdbs.autoRunAll();
+  const r = await window.cdbs.autoRunAll({ group: 'reports' });
   if (!r.ok) { alert(r.error || 'Could not start.'); return; }
   alert('Run all started: ' + r.count + ' job(s). Watch the banner for progress' + (r.withMorning ? ' - the PRODA code box appears in a moment.' : '.'));
+  setTimeout(refreshAuto, 4000);
+});
+$('btnRunAllSms').addEventListener('click', async () => {
+  const fl = (__fleet.byJob || {})['runall-sms'];
+  const ranToday = fl && fl.day === __fleet.today;
+  const warn = ranToday
+    ? 'SMS run ALREADY RAN TODAY at ' + new Date(fl.at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) + ' on ' + fl.machine + '.\n\nEvery texting job remembers who it already texted (nothing double-sends), so running again is safe. Run again anyway?'
+    : 'Run every switched-ON SMS report now? Texts go out to patients as each job runs.\n\nNothing double-sends: every job remembers who it has already texted.';
+  if (!confirm(warn)) return;
+  const r = await window.cdbs.autoRunAll({ group: 'sms' });
+  if (!r.ok) { alert(r.error || 'Could not start.'); return; }
+  alert('SMS run all started: ' + r.count + ' job(s). Watch the banner for progress.');
   setTimeout(refreshAuto, 4000);
 });
 
@@ -1651,7 +1670,7 @@ let __fleet = { byJob: {}, today: '' };
 async function refreshAuto() {
   try { __fleet = await window.cdbs.fleetLastruns(); } catch (e) { __fleet = { byJob: {}, today: '' }; }
   const r = await window.cdbs.autoGet();
-  $('autoTable').innerHTML = (r.jobs || []).map(job => `
+  const jobCard = job => `
     <div style="border:1px solid #f0f0f3; border-radius:14px; padding:14px; margin-bottom:10px;">
       <div class="row">
         <div style="flex:1;">
@@ -1685,7 +1704,10 @@ async function refreshAuto() {
         if (!use) return 'never';
         return esc(new Date(use.when).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) + (use.who ? ' — on ' + esc(use.who) : ' — this computer') + ' — ' + esc((use.outcome || '').split('\n')[0]);
       })()}</div>
-    </div>`).join('') || '<div class="muted">No jobs yet.</div>';
+    </div>`;
+  const allJobs = r.jobs || [];
+  $('autoTable').innerHTML = allJobs.filter(j => (j.group || 'reports') !== 'sms').map(jobCard).join('') || '<div class="muted">No jobs yet.</div>';
+  $('autoTableSms').innerHTML = allJobs.filter(j => (j.group || 'reports') === 'sms').map(jobCard).join('') || '<div class="muted">No SMS jobs yet.</div>';
 
   for (const b of document.querySelectorAll('button[data-savejob]')) {
     b.addEventListener('click', async () => {

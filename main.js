@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-08.12';
+const APP_BUILD = '2026-08-10.1';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4554,6 +4554,19 @@ function loadAutoJobs() {
   if (ne) ne.desc = 'Once a month, reminds you to re-check patients Medicare previously said no to - eligibility resets with new CDBS entitlement years. The check itself is the \'Re-check all ineligible patients\' button at the top of the Reactivation CDBS screen (needs a PRODA code). Anyone who comes back eligible moves onto the main list automatically.';
   const pj = s.jobs.find(j => j.id === 'phone-confirm');
   if (pj) pj.desc = 'Finds patients with no mobile number who have an appointment in the next 14 days, and adds a "confirm appointment manually" item for each to the Confirm appts section.';
+  // Two families: 'reports' feed the action list, 'sms' jobs text patients.
+  // Anything with SMS capability lives in the sms group and runs on its own
+  // clock, so texts land at a civilised hour rather than first thing with
+  // the morning reports.
+  const SMS_JOB_IDS = ['birthday', 'thankyou-cc'];
+  for (const j of s.jobs) {
+    if (SMS_JOB_IDS.includes(j.id)) j.group = 'sms';
+    else if (!j.group) j.group = 'reports';
+  }
+  if (!s.smsRunAllTime) s.smsRunAllTime = '10:45';
+  // First migration only: the SMS clock inherits the main clock's on/off,
+  // so birthday/thankyou texts never silently stop on the day of the update.
+  if (s.smsRunAllEnabled == null) s.smsRunAllEnabled = !!s.runAllEnabled;
   return s;
 }
 function saveAutoJobs(s) {
@@ -5587,45 +5600,58 @@ setInterval(async () => {
     const now = new Date();
     const today = localToday();
     const s = loadAutoJobs();
-    if (!s.runAllEnabled) return;
-    const [h, m] = (s.runAllTime || '08:30').split(':').map(Number);
-    if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
-    if (s.lastRunAllDay === today) return;
-    try {
-      const fr = await fleetRuns();
-      const already = fr.find(r2 => r2.jobId === 'runall' && r2.day === today);
-      if (already) {
-        const sF = loadAutoJobs();
-        sF.lastRunAllDay = today;
-        saveAutoJobs(sF);
-        appJournal('daily RUN ALL clock: standing down - already ran today (' + (already.machine || '?') + ')');
-        return;
+    // TWO CLOCKS, same machinery: the reports run and the SMS run each
+    // carry their own time, their own once-a-day memory and their own
+    // fleet claim - so texting jobs go out at a civilised hour instead of
+    // first thing with the morning reports.
+    const clocks = [
+      { group: 'reports', enabled: !!s.runAllEnabled, time: s.runAllTime || '08:30', dayKey: 'lastRunAllDay', deferKey: 'lastDeferTold', claim: 'runall', label: 'daily RUN ALL' },
+      { group: 'sms', enabled: !!s.smsRunAllEnabled, time: s.smsRunAllTime || '10:45', dayKey: 'lastSmsRunAllDay', deferKey: 'lastSmsDeferTold', claim: 'runall-sms', label: 'daily SMS RUN ALL' },
+    ];
+    for (const c of clocks) {
+      if (!c.enabled) continue;
+      const [h, m] = c.time.split(':').map(Number);
+      if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) continue;
+      if (s[c.dayKey] === today) continue;
+      try {
+        const fr = await fleetRuns();
+        const already = fr.find(r2 => r2.jobId === c.claim && r2.day === today);
+        if (already) {
+          const sF = loadAutoJobs();
+          sF[c.dayKey] = today;
+          saveAutoJobs(sF);
+          s[c.dayKey] = today;
+          appJournal(c.label + ' clock: standing down - already ran today (' + (already.machine || '?') + ')');
+          continue;
+        }
+      } catch (eF) { /* cloud quiet - fall through to the ledger claim below */ }
+      if (autoRunAllBusy || morningState.running || runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || noteWorkerBusy) return;
+      const login = await ensurePrincipleForJobs();   // heal ladder, not the naked probe
+      if (!login.ok) {
+        if (s[c.deferKey] !== today) {
+          const sD = loadAutoJobs();
+          sD[c.deferKey] = today;
+          saveAutoJobs(sD);
+          s[c.deferKey] = today;
+          appJournal(c.label + ': deferring - Principle needs a login (window opened); retrying every 5 minutes');
+        }
+        return;   // defer to the next pulse, never spend the day
       }
-    } catch (eF) { /* cloud quiet - fall through to the ledger claim below */ }
-    if (autoRunAllBusy || morningState.running || runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || noteWorkerBusy) return;
-    const login = await ensurePrincipleForJobs();   // heal ladder, not the naked probe
-    if (!login.ok) {
-      if (s.lastDeferTold !== today) {
-        const sD = loadAutoJobs();
-        sD.lastDeferTold = today;
-        saveAutoJobs(sD);
-        s.lastDeferTold = today;
-        appJournal('daily RUN ALL: deferring - Principle needs a login (window opened); retrying every 5 minutes');
+      const claim = await ledgerClaim(c.claim);
+      const s2 = loadAutoJobs();   // fresh read: never clobber a Save made during the waits
+      if (!claim.mine) {
+        s2[c.dayKey] = today;
+        saveAutoJobs(s2);
+        s[c.dayKey] = today;
+        appJournal(c.label + ': already ran today on ' + claim.who);
+        continue;
       }
-      return;   // defer to the next pulse, never spend the day
-    }
-    const claim = await ledgerClaim('runall');
-    const s2 = loadAutoJobs();   // fresh read: never clobber a Save made during the waits
-    if (!claim.mine) {
-      s2.lastRunAllDay = today;
+      s2[c.dayKey] = today;
       saveAutoJobs(s2);
-      appJournal('daily RUN ALL: already ran today on ' + claim.who);
-      return;
+      autoRunAllBusy = true;
+      runAllCore('scheduled ' + c.time, c.group);
+      return;   // one run per pulse - the other clock gets the next pulse
     }
-    s2.lastRunAllDay = today;
-    saveAutoJobs(s2);
-    autoRunAllBusy = true;
-    runAllCore('scheduled ' + (s.runAllTime || '08:30'));
   } catch (e) { /* the pulse never dies */ }
 }, 5 * 60 * 1000);
 
@@ -5634,6 +5660,7 @@ ipcMain.handle('auto-get', () => {
   const ms = loadMorningSettings();
   const morningRow = {
     id: 'cdbs-14day',
+    group: 'reports',
     name: '14-day CDBS morning run',
     desc: 'The big daily check: pulls the 14-day appointment report, collects Medicare details, asks your phone for the YES, checks every balance in PRODA and writes the notes into Principle. Credentials and Telegram live in Advanced tools - Morning run settings; the schedule lives right here.',
     url: '',
@@ -5679,13 +5706,15 @@ ipcMain.handle('auto-save', (e, p) => {
   return { ok: true };
 });
 let autoRunAllBusy = false;
-async function runAllCore(how) {
+async function runAllCore(how, group) {
+  group = group === 'sms' ? 'sms' : 'reports';
+  const LBL = group === 'sms' ? 'SMS RUN ALL' : 'RUN ALL';
   const s = loadAutoJobs();
   const ms = loadMorningSettings();
-  const jobs = (s.jobs || []).filter(j => j.enabled);
-  const withMorning = !!ms.enabled;
+  const jobs = (s.jobs || []).filter(j => j.enabled && (j.group || 'reports') === group);
+  const withMorning = group === 'reports' && !!ms.enabled;
   const results = [];
-  appJournal('RUN ALL (' + how + '): ' + (jobs.length + (withMorning ? 1 : 0)) + ' job(s)');
+  appJournal(LBL + ' (' + how + '): ' + (jobs.length + (withMorning ? 1 : 0)) + ' job(s)');
   let prodaWarm = null;
   if (withMorning) {
     appJournal('run all: asking for the PRODA code up front (desk box + Telegram - first answer wins)');
@@ -5728,46 +5757,52 @@ async function runAllCore(how) {
     if (ms3.telegramToken && ms3.telegramChatId) {
       const lines = results.map(r2 => ((/fail|error|skipped|aborted|not successful|stopped/i.test(r2.outcome) ? '⚠ ' : '✓ ') + r2.name + ': ' + r2.outcome));
       await telegram.send(ms3.telegramToken, ms3.telegramChatId,
-        'Daily RUN ALL (' + how + ') finished ' + new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) + '\n' + lines.join('\n'));
+        'Daily ' + LBL + ' (' + how + ') finished ' + new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) + '\n' + lines.join('\n'));
     }
   } catch (e3) { appJournal('run-all summary send failed: ' + String(e3).slice(0, 80)); }
   try {
     const lines2 = results.map(r2 => ((/fail|error|skipped|aborted|not successful|stopped/i.test(r2.outcome) ? '⚠ ' : '✓ ') + r2.name + ': ' + r2.outcome));
-    await ledgerReport('runall', 'RUN ALL (' + how + ')', lines2.join('\n'));
+    await ledgerReport(group === 'sms' ? 'runall-sms' : 'runall', LBL + ' (' + how + ')', lines2.join('\n'));
     const mres = results.find(r2 => r2.name === '14-day CDBS morning run');
     if (mres) await ledgerReport('cdbs-14day', '14-day CDBS morning run', mres.outcome);
   } catch (e5) { /* history is best-effort */ }
-  appJournal('RUN ALL finished (' + how + ')');
+  appJournal(LBL + ' finished (' + how + ')');
   autoRunAllBusy = false;
 }
 
-ipcMain.handle('auto-run-all', async () => {
-  if (autoRunAllBusy) return { ok: false, error: 'Run all is already going.' };
+ipcMain.handle('auto-run-all', async (e, p) => {
+  const group = p && p.group === 'sms' ? 'sms' : 'reports';
+  if (autoRunAllBusy) return { ok: false, error: 'A run all is already going.' };
   if (noteWorkerBusy) return { ok: false, error: 'A note is being written to Principle - try again in a few seconds.' };
   if (morningState.running || runAllState.running || runState.running || collectState.running || balanceState.running || genState.running) {
     return { ok: false, error: 'Something is already running - let it finish first.' };
   }
   const s = loadAutoJobs();
   const ms = loadMorningSettings();
-  const n = (s.jobs || []).filter(j => j.enabled).length + (ms.enabled ? 1 : 0);
+  const withMorning = group === 'reports' && !!ms.enabled;
+  const n = (s.jobs || []).filter(j => j.enabled && (j.group || 'reports') === group).length + (withMorning ? 1 : 0);
   autoRunAllBusy = true;
-  runAllCore('button');
-  return { ok: true, count: n, withMorning: !!ms.enabled };
+  runAllCore('button', group);
+  return { ok: true, count: n, withMorning };
 });
 
 ipcMain.handle('runall-sched', (e, p) => {
   const s = loadAutoJobs();
-  if (p.enabled != null) s.runAllEnabled = !!p.enabled;
+  const sms = !!(p && p.group === 'sms');
+  const enKey = sms ? 'smsRunAllEnabled' : 'runAllEnabled';
+  const timeKey = sms ? 'smsRunAllTime' : 'runAllTime';
+  const fallback = sms ? '10:45' : '08:30';
+  if (p.enabled != null) s[enKey] = !!p.enabled;
   if (p.time != null) {
     const d = String(p.time).replace(/\D/g, '');
     if (d.length >= 3 && d.length <= 4) {
       const hh = Number(d.slice(0, d.length - 2)), mm = Number(d.slice(-2));
-      if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) s.runAllTime = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+      if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) s[timeKey] = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
     }
   }
   saveAutoJobs(s);
-  appJournal('daily RUN ALL schedule: ' + (s.runAllEnabled ? ('ON at ' + (s.runAllTime || '08:30')) : 'OFF'));
-  return { ok: true, enabled: !!s.runAllEnabled, time: s.runAllTime || '08:30' };
+  appJournal('daily ' + (sms ? 'SMS ' : '') + 'RUN ALL schedule: ' + (s[enKey] ? ('ON at ' + (s[timeKey] || fallback)) : 'OFF'));
+  return { ok: true, enabled: !!s[enKey], time: s[timeKey] || fallback };
 });
 
 ipcMain.handle('auto-run', async (e, p) => {

@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('cdbs', {
   actionPinNote: (p) => ipcRenderer.invoke('action-pin-note', p),
   actionPark: (p) => ipcRenderer.invoke('action-park', p),
   noteRetry: (p) => ipcRenderer.invoke('note-retry', p),
-  autoRunAll: () => ipcRenderer.invoke('auto-run-all'),
+  autoRunAll: (p) => ipcRenderer.invoke('auto-run-all', p),
   runallSched: (p) => ipcRenderer.invoke('runall-sched', p),
   fleetLastruns: () => ipcRenderer.invoke('fleet-lastruns'),
   runHistory: () => ipcRenderer.invoke('run-history'),
