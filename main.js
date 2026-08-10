@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-10.1';
+const APP_BUILD = '2026-08-10.2';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -6233,19 +6233,56 @@ app.whenReady().then(async () => {
       const s = loadMorningSettings();
       if (!s.telegramToken || !s.telegramChatId) return;
 
+      // One debrief per FLEET per day, not per machine: claim the ledger
+      // slot first. (Fail-open like every claim - if the cloud is down we
+      // still send rather than go silent.)
+      try {
+        const dClaim = await ledgerClaim('evening-debrief');
+        if (!dClaim.mine) {
+          hs.sentEvening = today;
+          saveHealthState(hs);
+          appJournal('6pm debrief: already sent today by ' + (dClaim.who || 'another machine'));
+          return;
+        }
+      } catch (eC) { /* claim unreachable - send anyway */ }
+
+      // FLEET truth first: the run ledger holds every machine's runs for
+      // today, so the debrief no longer goes blind when another computer
+      // did the morning's work. Local records are the fallback.
+      let fleetToday = [];
+      try { fleetToday = (await fleetRuns()).filter(r2 => r2.day === today); } catch (eL) { /* local view only */ }
+      const fleetOf = (id) => fleetToday.find(r2 => r2.jobId === id) || null;
+      const tagM = (m) => (m && m !== MACHINE ? ' (' + m + ')' : '');
+      const badRe = /^(failed|crashed|aborted|stopped)/;
+
       const lines = ['6pm debrief — ' + now.toLocaleDateString('en-AU', { weekday: 'long', day: '2-digit', month: '2-digit' }) + ':'];
-      // The CDBS run
-      const cdbs = hs.cdbsLastRun && localDateOf(hs.cdbsLastRun.when || '') === today ? hs.cdbsLastRun : null;
+      // The CDBS run. NOTE: success is recorded in lastMorningRun (morning
+      // settings); hs.cdbsLastRun only ever holds FAILURES - the old code
+      // read only the failure slot, so every good day said "DID NOT RUN".
+      const cdbsFleet = fleetOf('cdbs-14day');
+      const cdbsLocal =
+        (s.lastMorningRun && localDateOf(s.lastMorningRun.when || '') === today) ? s.lastMorningRun :
+        (hs.cdbsLastRun && localDateOf(hs.cdbsLastRun.when || '') === today) ? hs.cdbsLastRun : null;
       const cdbsDue = ![0, 6].includes(now.getDay());
-      lines.push(cdbs ? '✓ CDBS check: ' + cdbs.outcome : (cdbsDue ? '✗ CDBS check: DID NOT RUN today' : '— CDBS check: not scheduled today'));
-      // Every auto report
+      if (cdbsLocal || cdbsFleet) {
+        const rec = cdbsLocal || cdbsFleet;
+        const who = cdbsLocal ? MACHINE : cdbsFleet.machine;
+        lines.push((badRe.test(rec.outcome || '') ? '✗ ' : '✓ ') + 'CDBS check: ' + rec.outcome + tagM(who));
+      } else {
+        lines.push(cdbsDue ? '✗ CDBS check: DID NOT RUN today' : '— CDBS check: not scheduled today');
+      }
+      // Every auto report: this machine's record if it ran here, otherwise
+      // the ledger's record from whichever machine ran it.
       for (const j of loadAutoJobs().jobs) {
         if (j.id === 'cdbs-14day') continue;
         if (!j.enabled) { lines.push('— ' + j.name + ': switched off'); continue; }
         if (!j.days.includes(now.getDay())) { lines.push('— ' + j.name + ': not scheduled today'); continue; }
-        if (j.lastRun && localDateOf(j.lastRun.when || '') === today) {
-          const bad = /^(failed|crashed|aborted)/.test(j.lastRun.outcome || '');
-          lines.push((bad ? '✗ ' : '✓ ') + j.name + ': ' + j.lastRun.outcome);
+        const fr2 = fleetOf(j.id);
+        const rec = (j.lastRun && localDateOf(j.lastRun.when || '') === today)
+          ? { outcome: j.lastRun.outcome, machine: MACHINE }
+          : (fr2 ? { outcome: fr2.outcome, machine: fr2.machine } : null);
+        if (rec) {
+          lines.push((badRe.test(rec.outcome || '') ? '✗ ' : '✓ ') + j.name + ': ' + rec.outcome + tagM(rec.machine));
         } else {
           lines.push('✗ ' + j.name + ': DID NOT RUN today');
         }
