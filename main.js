@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-11.2';
+const APP_BUILD = '2026-08-11.3';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4015,13 +4015,10 @@ ipcMain.handle('stop-everything', () => {
   return { ok: true };
 });
 
-ipcMain.handle('reactcdbs-check', async (e, p) => {
-  if (noteWorkerBusy) return { ok: false, error: 'A note is being written to Principle - try again in a few seconds.' };
-  if (runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || morningState.running) {
-    return { ok: false, error: 'Something is already running - let it finish first.' };
-  }
-  let items;
-  try { items = await fsPull(); } catch (err) { return { ok: false, error: 'Cannot reach the shared list - check the connection and try again.' }; }
+// One picker for every CDBS balance check - the screen buttons and the
+// daily auto top-up all choose their patients through here, so "fresh",
+// "stale" and "parked" mean the same thing everywhere.
+function pickCdbsBalanceTargets(items, scope, cap) {
   const todayIso = localToday();
   const st = loadPatientState();
   const cards = items.filter(i => i.kind === 'reactcdbs' && !i.doneAt && !(i.due && i.due > todayIso) && i.patientId && !String(i.patientId).startsWith('name:'));
@@ -4041,23 +4038,35 @@ ipcMain.handle('reactcdbs-check', async (e, p) => {
     return !!(m && Number(m[1].replace(/,/g, '')) < 100);   // under $100: not worth a ring
   };
   let toCheck;
-  if (p.scope === 'noteligible') {
+  if (scope === 'noteligible') {
     // The monthly ritual: re-check everyone Medicare previously said no
     // to - eligibility resets with new entitlement years.
     toCheck = cards.filter(i => notElig(i) && !fresh(i));
     toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
-  } else if (p.scope === 'unchecked') {
+  } else if (scope === 'unchecked') {
     // Fill the blanks: every patient with no balance ever recorded. No cap.
     toCheck = cards.filter(i => !balOf(i));
     toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
   } else {
     // Refresh: balance exists but is over a fortnight old. Stalest first,
     // so the oldest information is always the next to be topped up.
-    // (Never-checked patients belong to the 'unchecked' button - no overlap.)
+    // (Never-checked patients belong to the 'unchecked' scope - no overlap.)
     toCheck = cards.filter(i => balOf(i) && !fresh(i) && !notElig(i));
     toCheck.sort((x, y) => String((balOf(x) || {}).w || '').localeCompare(String((balOf(y) || {}).w || '')));
   }
-  if (p.scope !== 'all' && p.scope !== 'noteligible' && p.scope !== 'unchecked') toCheck = toCheck.slice(0, 20);
+  if (cap && toCheck.length > cap) toCheck = toCheck.slice(0, cap);
+  return toCheck;
+}
+
+ipcMain.handle('reactcdbs-check', async (e, p) => {
+  if (noteWorkerBusy) return { ok: false, error: 'A note is being written to Principle - try again in a few seconds.' };
+  if (runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || morningState.running) {
+    return { ok: false, error: 'Something is already running - let it finish first.' };
+  }
+  let items;
+  try { items = await fsPull(); } catch (err) { return { ok: false, error: 'Cannot reach the shared list - check the connection and try again.' }; }
+  const cap = (p.scope !== 'all' && p.scope !== 'noteligible' && p.scope !== 'unchecked') ? 20 : 0;
+  const toCheck = pickCdbsBalanceTargets(items, p.scope, cap);
   if (!toCheck.length) {
     const why = p.scope === 'unchecked'
       ? 'Nothing to check - every linked patient on the list already has a balance recorded.'
@@ -4070,6 +4079,33 @@ ipcMain.handle('reactcdbs-check', async (e, p) => {
   runManual(toCheck.map(i => ({ patientId: i.patientId, name: i.name, dob: i.dob || '' })));
   return { ok: true, count: toCheck.length };
 });
+
+// The daily top-up: chained onto the RUN ALL straight after the morning
+// run, while the PRODA session is still warm - so it costs zero extra
+// codes. Every never-checked patient first (no cap), then the stalest
+// balances over a fortnight old up to the job's daily quota.
+async function runReactCdbsBalancesJob(job) {
+  runlogStart('auto-cdbs-balances');
+  runlog('=== auto: ' + job.name + ' ===');
+  let items;
+  try { items = await fsPull(); } catch (err) {
+    runlog('shared list unreachable - job skipped');
+    return { outcome: 'skipped: shared list unreachable' };
+  }
+  const quota = Math.max(1, Math.min(200, Number(job.quota) || 20));
+  const unchecked = pickCdbsBalanceTargets(items, 'unchecked', 0);
+  const refresh = pickCdbsBalanceTargets(items, 'refresh', quota);
+  const toCheck = unchecked.concat(refresh);
+  runlog('targets: ' + unchecked.length + ' never checked + ' + refresh.length + ' stalest over 14 days (quota ' + quota + ')');
+  if (!toCheck.length) return { outcome: 'nothing to do - every balance is under a fortnight old' };
+  if (runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || morningState.running) {
+    return { outcome: 'skipped: something else was still running' };
+  }
+  runAllState = { running: true, stopRequested: false, waitingForLogin: false };
+  lastRunWasFile = true;   // sheet-only mode: no notes, no action-list feeding
+  await runManual(toCheck.map(i => ({ patientId: i.patientId, name: i.name, dob: i.dob || '' })));
+  return { outcome: unchecked.length + ' unchecked + ' + refresh.length + ' refreshed (quota ' + quota + ') - dollar figures are on the cards' };
+}
 
 ipcMain.handle('patient-state-map', () => {
   try {
@@ -4461,6 +4497,20 @@ function loadAutoJobs() {
       url: 'https://app.principle.dental/reporting/custom-reports/2VON7F8xHuej0nJ5NbEu',
       days: [1, 2, 3, 4, 5],
       time: '08:35',
+      enabled: true,
+      lastRun: null,
+    });
+  }
+  if (!s.jobs.find(j => j.id === 'react-cdbs-balances')) {
+    s.jobs.push({
+      id: 'react-cdbs-balances',
+      name: 'CDBS reactivation balances',
+      desc: 'Keeps the Reactivation CDBS list honest every day, riding the same warm PRODA session as the morning run (no extra code). First it checks every patient who has never had a balance looked up, then it refreshes the stalest balances over a fortnight old - up to the daily quota below, oldest information first. Dollar figures land on the cards ready for the calling session.',
+      url: '',
+      group: 'proda',
+      days: [1, 2, 3, 4, 5],
+      time: '08:30',
+      quota: 20,
       enabled: true,
       lastRun: null,
     });
@@ -5730,6 +5780,7 @@ async function runAutoJob(id) {
     else if (job.id === 'reactivation') result = await runReactivationJob(job);
     else if (job.id === 'react-cdbs') result = await runReactCdbsJob(job);
     else if (job.id === 'thankyou-cc') result = await runThankYouJob(job);
+    else if (job.id === 'react-cdbs-balances') result = await runReactCdbsBalancesJob(job);
     else if (job.id === 'noteligible-monthly') {
       const lm = job.lastRun && job.lastRun.when ? new Date(job.lastRun.when) : null;
       const nowD = new Date();
@@ -5876,6 +5927,7 @@ ipcMain.handle('auto-save', (e, p) => {
       if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) job.time = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
     }
   }
+  if (p.quota != null) { const q = Number(String(p.quota).replace(/\D/g, '')); if (q >= 1 && q <= 200) job.quota = q; }
   if (p.template != null) job.template = String(p.template).slice(0, 320);
   if (p.sender != null) job.sender = String(p.sender).slice(0, 20);
   job.enabled = !!p.enabled;
@@ -5933,6 +5985,21 @@ async function runAllCore(how, group) {
       morningState.running = false;
       results.push({ name: '14-day CDBS morning run', outcome: 'ERRORED: ' + String(e4).slice(0, 90) });
       appJournal('run all - morning run ERRORED: ' + String(e4).slice(0, 120));
+    }
+  }
+  // ---- CDBS reactivation balance top-up: rides the still-warm PRODA ----
+  // session from the morning run, so the day's balances cost zero codes.
+  const balJob = (s.jobs || []).find(j => j.id === 'react-cdbs-balances');
+  if (group === 'reports' && balJob && balJob.enabled) {
+    try {
+      beat('Run all: CDBS reactivation balances');
+      live('Topping up CDBS reactivation balances \u2014 progress in the Morning run card below\u2026');
+      const rB = await runAutoJob('react-cdbs-balances');
+      results.push({ name: balJob.name, outcome: (rB && rB.outcome) || (rB && rB.error) || 'done' });
+      appJournal('run all - "' + balJob.name + '": ' + ((rB && rB.outcome) || (rB && rB.error) || 'done'));
+    } catch (eB) {
+      results.push({ name: balJob.name, outcome: 'ERRORED: ' + String(eB).slice(0, 80) });
+      appJournal('run all - "' + balJob.name + '" ERRORED: ' + String(eB).slice(0, 100));
     }
   }
   beat('');

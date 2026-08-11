@@ -1694,6 +1694,17 @@ async function refreshAuto() {
         </div>
         <label class="muted" style="font-size:12px;"><input type="checkbox" data-en="${job.id}" ${job.enabled ? 'checked' : ''}> On</label>
       </div>
+      ${job.id === 'react-cdbs-balances' ? `
+      <div class="row" style="margin-top:10px;">
+        <span class="muted" style="font-size:12.5px;">Runs by itself at the end of the daily RUN ALL — no clock of its own.</span>
+        <span class="muted">Daily refresh quota:</span>
+        <input type="number" data-quota="${job.id}" value="${Number(job.quota) || 20}" min="1" max="200" style="width:70px; font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;">
+        <span class="muted" style="font-size:12px;">stalest first — never-checked patients are always all checked</span>
+        <input type="hidden" data-time="${job.id}" value="${esc(job.time)}">
+        <button class="secondary" data-savejob="${job.id}" style="padding:6px 14px;">Save</button>
+        <span class="spacer"></span>
+        <button class="primary" data-runjob="${job.id}" style="padding:6px 14px;">Run now</button>
+      </div>` : `
       <div class="row" style="margin-top:10px;">
         <span class="muted">Days:</span>
         ${DAY_LABELS.map((d, idx) => `<label style="font-size:12px;"><input type="checkbox" data-day="${job.id}:${idx}" ${job.days.includes(idx) ? 'checked' : ''}>${d}</label>`).join('')}
@@ -1701,7 +1712,7 @@ async function refreshAuto() {
         <button class="secondary" data-savejob="${job.id}" style="padding:6px 14px;">Save</button>
         <span class="spacer"></span>
         <button class="primary" data-runjob="${job.id}" style="padding:6px 14px;">Run now</button>
-      </div>
+      </div>`}
       ${job.id === 'birthday' ? `
       <div class="row" style="margin-top:10px;">
         <textarea data-tmpl="${job.id}" style="flex:1; min-width:240px; font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:8px; font-size:13px;" rows="2">${esc(job.template || '')}</textarea>
@@ -1746,8 +1757,10 @@ async function refreshAuto() {
       const en = document.querySelector(`input[data-en="${id}"]`).checked;
       const tmplEl = document.querySelector(`textarea[data-tmpl="${id}"]`);
       const sndEl = document.querySelector(`input[data-sender="${id}"]`);
+      const qEl = document.querySelector(`input[data-quota="${id}"]`);
       await window.cdbs.autoSave({ id, days, time, enabled: en,
-        template: tmplEl ? tmplEl.value : null, sender: sndEl ? sndEl.value : null });
+        template: tmplEl ? tmplEl.value : null, sender: sndEl ? sndEl.value : null,
+        quota: qEl ? qEl.value : null });
       refreshAuto();
     });
   }
