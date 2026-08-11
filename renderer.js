@@ -2229,10 +2229,16 @@ $('cdbsSort').addEventListener('change', () => refreshReactCdbs(false));
 $('navReact').addEventListener('click', () => { showView2('viewReact'); refreshReact(); });
 $('navReactCdbs').addEventListener('click', () => { showView2('viewReactCdbs'); refreshBalMap().then(() => refreshReactCdbs()); });
 $('btnCdbsBatch').addEventListener('click', async () => {
-  if (!confirm('Check CDBS balances for the first 20 patients not yet checked today?\n\nOne PRODA code, about 15 minutes. Progress shows on the CDBS / Medicare screen.')) return;
+  if (!confirm('Refresh CDBS balances for up to 20 patients whose balance is more than a fortnight old?\n\nStalest first. One PRODA code, about 15 minutes. Progress shows on the CDBS / Medicare screen.')) return;
   const r = await window.cdbs.reactCdbsCheck({ scope: 'batch' });
   if (!r.ok) { alert(r.error || 'Could not start.'); return; }
-  $('cdbsCheckState').textContent = 'Checking ' + r.count + ' — balances appear on the cards as they land.';
+  $('cdbsCheckState').textContent = 'Refreshing ' + r.count + ' — balances appear on the cards as they land.';
+});
+$('btnCdbsUnchecked').addEventListener('click', async () => {
+  if (!confirm('Check every patient whose balance has NEVER been looked up?\n\nNo cap — about 45 seconds each, so a long list means a long session. One PRODA code. Progress shows on the CDBS / Medicare screen.')) return;
+  const r = await window.cdbs.reactCdbsCheck({ scope: 'unchecked' });
+  if (!r.ok) { alert(r.error || 'Could not start.'); return; }
+  $('cdbsCheckState').textContent = 'Checking ' + r.count + ' unchecked — balances appear on the cards as they land.';
 });
 $('btnCdbsNotElig').addEventListener('click', async () => {
   if (!confirm('Re-check CDBS eligibility for every ineligible patient?\n\nOne PRODA code. Anyone who comes back eligible moves onto the main list automatically.')) return;
@@ -2241,7 +2247,7 @@ $('btnCdbsNotElig').addEventListener('click', async () => {
   $('cdbsCheckState').textContent = 'Re-checking ' + r.count + ' — balances refresh as they land.';
 });
 $('btnCdbsAll').addEventListener('click', async () => {
-  if (!confirm('Check EVERYONE on this list not yet checked today?\n\nA long job — hours for a big list. PRODA stays busy throughout. Best after close.')) return;
+  if (!confirm('Check EVERYONE on this list whose balance is more than a fortnight old?\n\nA long job — hours for a big list. PRODA stays busy throughout. Best after close.')) return;
   const r = await window.cdbs.reactCdbsCheck({ scope: 'all' });
   if (!r.ok) { alert(r.error || 'Could not start.'); return; }
   $('cdbsCheckState').textContent = 'Checking ' + r.count + ' — balances appear on the cards as they land.';

@@ -209,12 +209,13 @@
       <input type="text" id="reactCdbsSearch" placeholder="Search any patient — incl. already called…" style="width:260px;">
     </div>
     <div class="row" style="margin-top:12px; background:#f0f6f3; border-radius:12px; padding:12px;">
-      <button class="primary" id="btnCdbsBatch" style="font-size:14px;">Check first 20 CDBS balances</button>
+      <button class="primary" id="btnCdbsBatch" style="font-size:14px;">Refresh CDBS balances</button>
+      <button class="secondary" id="btnCdbsUnchecked">Check unchecked balances</button>
       <button class="secondary" id="btnCdbsAll">Check everyone on this list</button>
       <button class="secondary" id="btnCdbsNotElig">Re-check all ineligible patients</button>
       <span id="cdbsCheckState" class="muted"></span>
     </div>
-    <div class="muted" style="margin-top:6px;">Press the green button before a calling session — it refreshes balances for the first 20 patients not yet checked today (one PRODA code, ~15 min). Balances show on each card with the date checked.</div>
+    <div class="muted" style="margin-top:6px; font-size:12.5px;">Tops up anyone whose balance is more than a fortnight old — one PRODA code, and the dollar figures land on the cards as they're checked. <b>Check unchecked balances</b> fills in every patient who has never had a balance looked up.</div>
     <div id="reactCdbsList" style="margin-top:14px;"></div>
   </div>
 </div>

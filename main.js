@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-11.1';
+const APP_BUILD = '2026-08-11.2';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4032,7 +4032,7 @@ ipcMain.handle('reactcdbs-check', async (e, p) => {
     if (loc && mir) return (loc.w || '') >= (mir.w || '') ? loc : mir;
     return loc || mir;
   };
-  const fresh = (i) => { const b = balOf(i); return !!(b && b.w && localDateOf(b.w) === todayIso); };
+  const fresh = (i) => { const b = balOf(i); if (!b || !b.w) return false; const d = daysSince(b.w); return d != null && d < 14; };   // checked within a fortnight
   const notElig = (i) => {
     const b = balOf(i);
     if (!b) return false;
@@ -4045,12 +4045,25 @@ ipcMain.handle('reactcdbs-check', async (e, p) => {
     // The monthly ritual: re-check everyone Medicare previously said no
     // to - eligibility resets with new entitlement years.
     toCheck = cards.filter(i => notElig(i) && !fresh(i));
+    toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
+  } else if (p.scope === 'unchecked') {
+    // Fill the blanks: every patient with no balance ever recorded. No cap.
+    toCheck = cards.filter(i => !balOf(i));
+    toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
   } else {
-    toCheck = cards.filter(i => !fresh(i) && !notElig(i));
+    // Refresh: balance exists but is over a fortnight old. Stalest first,
+    // so the oldest information is always the next to be topped up.
+    // (Never-checked patients belong to the 'unchecked' button - no overlap.)
+    toCheck = cards.filter(i => balOf(i) && !fresh(i) && !notElig(i));
+    toCheck.sort((x, y) => String((balOf(x) || {}).w || '').localeCompare(String((balOf(y) || {}).w || '')));
   }
-  toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
-  if (p.scope !== 'all' && p.scope !== 'noteligible') toCheck = toCheck.slice(0, 20);
-  if (!toCheck.length) return { ok: false, error: 'Nothing to check - every linked patient on the list was already checked today.' };
+  if (p.scope !== 'all' && p.scope !== 'noteligible' && p.scope !== 'unchecked') toCheck = toCheck.slice(0, 20);
+  if (!toCheck.length) {
+    const why = p.scope === 'unchecked'
+      ? 'Nothing to check - every linked patient on the list already has a balance recorded.'
+      : 'Nothing to check - every linked patient on the list was checked within the last fortnight.';
+    return { ok: false, error: why };
+  }
   runAllState = { running: true, stopRequested: false, waitingForLogin: false };
   lastRunWasFile = true;   // sheet-only mode: no notes, no action-list feeding
   runlogStart('cdbs-balance-check');
