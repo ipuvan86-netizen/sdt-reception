@@ -1929,6 +1929,65 @@ $('rName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnRou
 
 
 // ---------- Reactivation workstation ----------
+// ---- Reactivation CDBS: in-app "no answer" text panel -------------
+// Big amber confirm strip injected into the card. Send-then-done: the
+// main process only marks the card "texted" after Cellcast accepts.
+function smsPanelClose(id) {
+  const p = document.querySelector(`div[data-smspanel="${id}"]`);
+  if (p) p.remove();
+}
+async function smsPanelOpen(id, cardEl) {
+  smsPanelClose(id);
+  let it = (__items.list || []).find(x => x.id === id);
+  if (!it) { try { await getItems(true); } catch (e) { /* offline - fall through */ } it = (__items.list || []).find(x => x.id === id); }
+  const panel = document.createElement('div');
+  panel.setAttribute('data-smspanel', id);
+  const mob = it && String(it.mobile || '').trim();
+  if (!it || !mob) {
+    panel.style.cssText = 'margin-top:10px; background:#fdecec; border:2px solid #c0392b; border-radius:12px; padding:13px;';
+    panel.innerHTML = `<div style="font-weight:700; font-size:13.5px; color:#c0392b;">No mobile number on this patient — nothing can be sent.</div>
+      <div style="margin-top:9px;"><button data-smscancel="${id}" style="border:none; cursor:pointer; border-radius:99px; padding:6px 14px; font-size:12px; background:#f2f2f5; color:#6e6e73;">Close</button></div>`;
+    cardEl.appendChild(panel);
+    return;
+  }
+  let tmpl = '';
+  try { const t = await window.cdbs.reactSmsTemplate(); tmpl = (t && t.message) || ''; } catch (e) { tmpl = ''; }
+  const again = it.smsSentAt
+    ? `<div style="background:#fdecec; color:#c0392b; border-radius:9px; padding:7px 11px; font-size:12.5px; font-weight:600; margin-bottom:9px;">⚠ Already texted ${new Date(it.smsSentAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })} — sending again anyway will text them twice.</div>`
+    : '';
+  panel.style.cssText = 'margin-top:10px; background:#fff4e0; border:2px solid #e2a93b; border-radius:12px; padding:14px; width:100%; box-sizing:border-box;';
+  panel.innerHTML = `
+    <div style="font-weight:700; font-size:14px; color:#9a6b00; margin-bottom:9px;">📱 Text about to go to <span style="color:#1d1d1f;">${esc(mob)}</span> — check the message, then press Send</div>
+    ${again}
+    <textarea data-smstext="${id}" style="width:100%; box-sizing:border-box; min-height:110px; font:inherit; font-size:13px; line-height:1.45; border:1px solid #d2d2d7; border-radius:10px; padding:9px 11px; resize:vertical;">${esc(tmpl)}</textarea>
+    <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button data-smssend="${id}" style="border:none; cursor:pointer; border-radius:99px; padding:8px 18px; font-size:13px; font-weight:700; background:#2F6B4F; color:#fff;">Send text</button>
+      <button data-smscancel="${id}" style="border:none; cursor:pointer; border-radius:99px; padding:8px 15px; font-size:12.5px; background:#f2f2f5; color:#6e6e73;">Cancel</button>
+      <span data-smsst="${id}" style="font-size:12.5px; color:#c0392b; font-weight:600;"></span>
+    </div>`;
+  cardEl.appendChild(panel);
+  const ta = panel.querySelector('textarea'); if (ta) ta.focus();
+}
+async function smsPanelSend(id) {
+  const panel = document.querySelector(`div[data-smspanel="${id}"]`);
+  if (!panel) return;
+  const btn = panel.querySelector(`button[data-smssend="${id}"]`);
+  const st = panel.querySelector(`span[data-smsst="${id}"]`);
+  const ta = panel.querySelector(`textarea[data-smstext="${id}"]`);
+  const msg = (ta && ta.value || '').trim();
+  if (!msg) { if (st) st.textContent = 'The message is empty — write it or press Cancel.'; return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; btn.style.background = '#9a9aa0'; }
+  if (st) st.textContent = '';
+  const r = await window.cdbs.reactSendSms({ id, message: msg });
+  if (!r.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry send'; btn.style.background = '#c0392b'; }
+    if (st) st.textContent = r.error || 'Send failed — try again.';
+    return;
+  }
+  panel.style.cssText = 'margin-top:10px; background:#e6f4ec; border:2px solid #1d7a46; border-radius:12px; padding:14px;';
+  panel.innerHTML = `<div style="font-weight:700; font-size:14px; color:#1d7a46;">✓ Text sent ${new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })}${r.noteQueued ? ' — Principle note queued' : ''}</div>`;
+}
+
 function reactPill(id, key, label, on, color) {
   return `<button data-ro="${id}:${key}" style="border:none; cursor:pointer; border-radius:99px; padding:5px 12px; font-size:12px; font-weight:600; background:${on ? color + '22' : '#f2f2f5'}; color:${on ? color : '#6e6e73'};">${label}</button>`;
 }
@@ -2103,9 +2162,25 @@ function wireReactBox(boxId) {
       myRefresh();
       return;
     }
+    const smsSend = e.target.closest('button[data-smssend]');
+    if (smsSend) {
+      await smsPanelSend(smsSend.getAttribute('data-smssend'));
+      // On success the panel turned green; give it a beat, then repaint (card moves to Done).
+      setTimeout(() => { myRefresh(); refreshActions(); }, 1400);
+      return;
+    }
+    const smsCancel = e.target.closest('button[data-smscancel]');
+    if (smsCancel) { smsPanelClose(smsCancel.getAttribute('data-smscancel')); return; }
     const ro = e.target.closest('button[data-ro]');
     if (ro) {
       const [id, key] = ro.getAttribute('data-ro').split(':');
+      const it = (__items.list || []).find(x => x.id === id);
+      if (key === 'texted' && boxId === 'reactCdbsList') {
+        // CDBS: in-house texting - open the amber confirm panel, nothing marked yet.
+        const cardEl = ro.closest('div[style*="flex:1"]') || ro.parentElement;
+        await smsPanelOpen(id, cardEl);
+        return;
+      }
       let date = null;
       if (key === 'followup') {
         const d = document.querySelector(`input[data-rd="${id}"]`);
@@ -2115,9 +2190,7 @@ function wireReactBox(boxId) {
       const r = await window.cdbs.reactOutcome({ id, outcome: key, date });
       if (!r.ok && r.error) alert(r.error);
       if (r.ok && key === 'texted') {
-        // One press: open the Command Center on their number, item goes to Done.
-        const card = document.querySelector(`a[data-tel][data-owner="${id}"]`) || null;
-        const it = (__items.list || []).find(x => x.id === id);
+        // Health funds/DVA keeps the old hand-off: open the Command Center on their number.
         if (it && it.mobile) window.cdbs.openExternal('tel:' + String(it.mobile).replace(/\s+/g, ''));
       }
       myRefresh(); refreshActions();

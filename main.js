@@ -3186,7 +3186,7 @@ async function fbToken() {
   return fbTokInFlight;
 }
 
-const ACTION_KEYS = ['patientId', 'name', 'kind', 'text', 'context', 'token', 'createdAt', 'doneAt', 'doneNote', 'updatedAt', 'section', 'due', 'assignee', 'repeat', 'stageDentist', 'stageReception', 'noteText', 'howTo', 'escalated', 'outcome', 'attempts', 'principleWritten', 'plink', 'mobile', 'feeSched', 'lastVisit', 'notesLog', 'dob', 'deleted', 'balanceText', 'balanceChecked', 'parked', 'parkedAt', 'chaseFlag', 'viewsTag', 'viewsList', 'viewsRules'];
+const ACTION_KEYS = ['patientId', 'name', 'kind', 'text', 'context', 'token', 'createdAt', 'doneAt', 'doneNote', 'updatedAt', 'section', 'due', 'assignee', 'repeat', 'stageDentist', 'stageReception', 'noteText', 'howTo', 'escalated', 'outcome', 'attempts', 'principleWritten', 'plink', 'mobile', 'feeSched', 'lastVisit', 'notesLog', 'dob', 'deleted', 'balanceText', 'balanceChecked', 'parked', 'parkedAt', 'chaseFlag', 'viewsTag', 'viewsList', 'viewsRules', 'smsSentAt'];
 function itemToFields(it) {
   const f = {};
   for (const k of ACTION_KEYS) if (it[k] != null && it[k] !== '') f[k] = { stringValue: String(it[k]) };
@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-10.5';
+const APP_BUILD = '2026-08-11.1';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4106,6 +4106,53 @@ ipcMain.handle('react-outcome', (e, p) => {
   saveActions(a);
   fsPush(it);
   return { ok: true };
+});
+
+// -----------------------------------------------------------------
+// REACTIVATION CDBS - IN-APP "NO ANSWER" SMS
+// One amber confirm panel on the card, editable message, send via
+// Cellcast from THIS app (no Command Center hand-off). The item is
+// only marked done AFTER Cellcast accepts the send - "texted" is
+// true by construction. A Principle note is auto-queued on success.
+const REACT_CDBS_SMS = 'Hi, this is Southside Dental Toowoomba. We tried to give you a call today - your child has Medicare CDBS funding available for their check-up and clean. You\'re welcome to book online at www.sdtoowoomba.com.au, reply to this message, or call us on (07) 4635 1444. We\'d love to see them soon!';
+
+ipcMain.handle('react-sms-template', () => ({ ok: true, message: REACT_CDBS_SMS }));
+
+ipcMain.handle('react-send-sms', async (e, p) => {
+  const a = loadActions();
+  const it = a.items.find(x => x.id === p.id);
+  if (!it) return { ok: false, error: 'Item not found - refresh the list.' };
+  if (it.kind !== 'reactcdbs') return { ok: false, error: 'In-app texting is only wired for the Reactivation CDBS list.' };
+  const num = normalizeMobile(it.mobile);
+  if (!num) return { ok: false, error: 'No usable mobile on this patient (' + (it.mobile || 'blank') + ') - nothing can be sent.' };
+  const message = String(p.message || '').trim().slice(0, 600) || REACT_CDBS_SMS;
+  const creds = cellcastCreds();
+  if (!creds.key) return { ok: false, error: 'Cellcast key not found on this PC (is the Command Center installed here?).' };
+  const r = await sendCellcastSms(creds.key, creds.sender, num, message);
+  const initials = String(it.name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + '.').join(' ') || '?';
+  if (!r.ok) {
+    appJournal('react-cdbs SMS FAILED for ' + initials + ' (' + num.slice(0, 7) + '...): ' + String(r.detail).slice(0, 120));
+    return { ok: false, error: 'Cellcast rejected it: ' + r.detail };
+  }
+  // Send succeeded - NOW mark the card done and remember the send.
+  const now = new Date().toISOString();
+  it.outcome = 'texted'; it.doneAt = now; it.smsSentAt = now; it.doneNote = it.noteText || '';
+  it.updatedAt = now;
+  // Auto-queue the pinned Principle note (same wording the manual button used).
+  let noteQueued = false;
+  if (it.plink || !String(it.patientId).startsWith('name:')) {
+    const note = 'Reactivation call ' + new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ': no answer, sent text';
+    const qid = queueNote({ patientId: it.patientId, name: it.name, note, pin: true, itemId: it.id });
+    const log = reactMigrate(it);
+    log.push({ t: '(outcome only)', full: note, d: now, dest: 'queued', q: qid });
+    it.notesLog = JSON.stringify(log);
+    noteQueued = true;
+  }
+  saveActions(a);
+  fsPush(it);
+  appJournal('react-cdbs SMS sent to ' + initials + ' (' + num.slice(0, 7) + '...)' + (noteQueued ? ', Principle note queued' : ', no Principle link - note skipped'));
+  sendUi('actions-changed', {});
+  return { ok: true, noteQueued };
 });
 
 function reactLog(it) {

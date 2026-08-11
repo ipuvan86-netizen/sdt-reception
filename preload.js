@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('cdbs', {
   actionDue: (p) => ipcRenderer.invoke('action-due', p),
   reactOutcome: (p) => ipcRenderer.invoke('react-outcome', p),
   reactWriteNote: (p) => ipcRenderer.invoke('react-write-note', p),
+  reactSendSms: (p) => ipcRenderer.invoke('react-send-sms', p),
+  reactSmsTemplate: () => ipcRenderer.invoke('react-sms-template'),
   reactOpenPatient: (p) => ipcRenderer.invoke('react-open-patient', p),
   reactNoteCommit: (p) => ipcRenderer.invoke('react-note-commit', p),
   reactNoteDel: (p) => ipcRenderer.invoke('react-note-del', p),
