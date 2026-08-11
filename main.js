@@ -1035,7 +1035,7 @@ async function pinFreshNote(patientId, noteText, patientName) {
         await new Promise(r => setTimeout(r, 900));
         const after = await win.webContents.executeJavaScript(pinScript(snippet, 'verify'), true);
         const solid = after && after.census && after.census.some(c => c.icon === 'bookmark' && (c.mine || c.cdbs));
-        if (solid) { pinAudit.pinned++; runlog('  pin verified solid'); return; }
+        if (solid) { pinAudit.pinned++; runlog('  pin verified solid'); return true; }
         runlog('  pin click did not stick - trying again');
       }
       await new Promise(r => setTimeout(r, 2000));
@@ -1498,10 +1498,16 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
     if (!res.ok && res.reason === 'nothing-returned' && sessionLooksAlive) {
       runlog('  empty reply with a healthy session - the patient, not the session; session rungs skipped');
     } else if (!res.ok && res.reason !== 'signed-out' && !res.text) {
+      runlog('  empty reply - photographing the page, then re-entering HPOS and retrying this patient');
+      await logFormForensics('empty reply, patient ' + (i + 1));
       onProgress(i, items.length, item, 'working', '');
       await proda.enterHpos();
       proda.parkOffscreen();
       res = await proda.checkBalance({ cardNumber: item.number, irn: item.irn, firstName: firstNameOf(1) });
+      if (!res.ok && !res.text) {
+        runlog('  still empty after re-entering HPOS' + (typeof recoverLogin === 'function' ? ' - trying a fresh login' : ' - no fresh-login rung in this mode'));
+        await logFormForensics('still empty after re-enter, patient ' + (i + 1));
+      }
       if (!res.ok && !res.text && typeof recoverLogin === 'function') {
         const back = await recoverLogin('The PRODA session looks dead partway through — logging in again.');
         if (back) {
@@ -3402,7 +3408,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-11.3';
+const APP_BUILD = '2026-08-11.4';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4262,6 +4268,10 @@ function saveNoteQueue(q) {
   try { fs.writeFileSync(noteQueuePath(), JSON.stringify(q, null, 2), 'utf8'); } catch (e) { /* ignore */ }
 }
 let noteWorkerBusy = false;
+// Initials only - patient names must never land in journals or the debug feed.
+function initialsOf(name) {
+  return String(name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + '.').join(' ') || '?';
+}
 
 function queueNote(entry) {
   const q = loadNoteQueue();
@@ -4303,21 +4313,22 @@ async function noteWorker() {
       const login = await ensurePrincipleForJobs();
       if (!login.ok) {
         en.tries++; saveNoteQueue(q);
-        if (en.tries >= 8) { q.shift(); saveNoteQueue(q); markLedger(en.itemId, en.qid, 'failed', 'Principle login never came good'); appJournal('queued note DROPPED for ' + en.name + ': Principle login never came good'); continue; }
+        if (en.tries >= 8) { q.shift(); saveNoteQueue(q); markLedger(en.itemId, en.qid, 'failed', 'Principle login never came good'); appJournal('queued note DROPPED for ' + initialsOf(en.name) + ': Principle login never came good'); continue; }
         setTimeout(noteWorker, 60 * 1000); break;
       }
       const res = await engine.addNoteToPatient(en.patientId, en.note, en.name);
       if (res.ok) {
-        if (en.pin) { try { await pinFreshNote(en.patientId, en.note, en.name); } catch (e) { /* note landed; pin is decoration */ } }
+        let pinnedOk = false;
+        if (en.pin) { try { pinnedOk = !!(await pinFreshNote(en.patientId, en.note, en.name)); } catch (e) { /* note landed; pin is decoration */ } }
         q.shift(); saveNoteQueue(q);
         markLedger(en.itemId, en.qid, 'principle');
-        appJournal('note sent to Principle for ' + en.name + (en.pin ? ' (pinned)' : ''));
+        appJournal('note sent to Principle for ' + initialsOf(en.name) + (en.pin ? (pinnedOk ? ' (pinned)' : ' (note written, pin failed)') : ''));
       } else {
         en.tries++; saveNoteQueue(q);
         if (en.tries >= 5) {
           q.shift(); saveNoteQueue(q);
           markLedger(en.itemId, en.qid, 'failed', res.reason || 'rejected');
-          appJournal('queued note FAILED for ' + en.name + ': ' + (res.reason || 'rejected'));
+          appJournal('queued note FAILED for ' + initialsOf(en.name) + ': ' + (res.reason || 'rejected'));
         } else {
           setTimeout(noteWorker, 45 * 1000); break;
         }
