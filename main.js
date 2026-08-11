@@ -3410,7 +3410,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-11.6';
+const APP_BUILD = '2026-08-11.7';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3435,13 +3435,13 @@ function redactNames(text) {
     for (const k of Object.keys(st)) if (st[k] && st[k].name) names.add(String(st[k].name).trim());
     try { for (const it of (loadActions().items || [])) if (it.name) names.add(String(it.name).trim()); } catch (e) { /* actions optional */ }
     for (const full of names) {
-      if (full.length < 6 || !full.includes(' ')) continue;
-      const parts = full.split(/\s+/);
+      if (full.length < 6 || !(full.includes(' ') || full.includes('-'))) continue;
+      const parts = full.split(/[\s-]+/).filter(Boolean);
       const initials = parts.map((p) => p[0] + '.').join(' ');
       // Whitespace-insensitive so "Demi  Schneider" (double space in the
       // report) still masks; each part regex-escaped so names containing
       // brackets like "((dental))" are safe.
-      const rx = new RegExp(parts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
+      const rx = new RegExp(parts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s-]+'), 'g');
       text = text.replace(rx, initials);
     }
   } catch (e) { /* redaction is best-effort; the secret link still protects */ }
@@ -3463,6 +3463,7 @@ async function uploadDebugFeed(force) {
     } catch (e) { blob = '(no logs found for today)'; }
     if (blob.length > 750 * 1024) blob = '...(older lines trimmed)...\n' + blob.slice(-750 * 1024);
     blob = redactNames(blob);
+    blob = blob.replace(/\d{5,}/g, '###');   // card + phone numbers never leave the machine
     let stats = [];
     try {
       const runs = await fleetRuns();
