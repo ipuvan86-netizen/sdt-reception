@@ -627,7 +627,7 @@ function classifyProda(raw) {
     return { kind: 'balance', value: bal[2] ? amount + ' as at ' + bal[2] : amount };
   }
   if (/not eligible/i.test(text)) return { kind: 'not-eligible' };
-  if (/invalid entry|not valid|could not be matched|cannot be matched|could not be found|cannot be found/i.test(text)) return { kind: 'invalid' };
+  if (/invalid entry|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(text)) return { kind: 'invalid' };
   const numeric = text.replace(/[$,\s]/g, '');
   if (numeric !== '' && !isNaN(Number(numeric))) {
     return { kind: 'balance', value: '$' + Number(numeric).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) };
@@ -1527,13 +1527,13 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
       await logFormForensics('after heal');
     }
     runlog('patient ' + (i + 1) + ' "' + item.name + '": reply=' + (res.ok ? 'ok' : (res.reason || 'fail')) + ' text="' + String(res.text || '').slice(0, 60) + '"');
-    if (!(!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found/i.test(res.text))) {
+    if (!(!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(res.text))) {
       if (!res.ok && !item.dob) runlog('  healing skipped: no date of birth on the row');
     }
-    if (!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found/i.test(res.text) && !item.dob) {
+    if (!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(res.text) && !item.dob) {
       runlog('  healing skipped: invalid entry but no date of birth on the row');
     }
-    if (!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found/i.test(res.text) && item.dob) {
+    if (!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(res.text) && item.dob) {
       runlog('  healing attempt: dob=' + item.dob);
       const dob8 = dob8Of(item.dob);
       const nm = splitName(item.name);
@@ -3410,7 +3410,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-11.7';
+const APP_BUILD = '2026-08-11.8';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
