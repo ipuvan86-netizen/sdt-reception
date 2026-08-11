@@ -877,7 +877,10 @@ function readResultScript() {
     const differMatch = text.match(/([^.]*matched using the submitted data[^.]*\\.)/i);
 
     // Anything that reads like an error or a warning.
-    const errorMatch = text.match(/((?:We could not|Unable to|No match|not found|invalid|incorrect|does not match)[^.]*\\.)/i);
+    // 2026-08-11: Services Australia reworded its rejections ("is not
+    // valid", "could not be matched to Services Australia's records") -
+    // sentence-style match so the keyword can sit anywhere in the line.
+    const errorMatch = text.match(/([^.]*(?:We could not|Unable to|No match|not found|invalid|incorrect|does not match|not valid|could not be matched|cannot be matched)[^.]*\\.)/i);
 
     return {
       balanceLine: take(balanceMatch),
