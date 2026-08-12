@@ -680,6 +680,29 @@ function updateFailureMemory(items) {
   return st;
 }
 
+// One-off self-heal (2026-08-12): builds 2026-08-11.5 through .8 read the
+// CDBS form's own furniture ("Opens new window...", "Please enter a
+// Medicare card number") as PRODA error replies, so every burned run gave
+// every patient a false strike. Three false strikes = chronic-skip, which
+// is why the 20:06 auto job checked NOBODY. Wipe strikes whose recorded
+// reason is that furniture; real failures keep their strikes.
+function healFurnitureStrikes() {
+  try {
+    const st = loadPatientState();
+    const furniture = /Opens new window|Please enter a Medicare card|PRODA returned a message rather than a balance/i;
+    let cleared = 0;
+    for (const id of Object.keys(st)) {
+      const e = st[id];
+      if (e && e.lastFailReason && furniture.test(e.lastFailReason)) {
+        delete e.failCount; delete e.lastFailReason;
+        delete e.lastAttemptAt; delete e.firstFailedAt;
+        cleared++;
+      }
+    }
+    if (cleared) { savePatientState(st); appJournal('strike memory healed: ' + cleared + ' patient(s) cleared of false furniture-reply strikes'); }
+  } catch (e) { appJournal('strike memory heal failed: ' + String(e).slice(0, 100)); }
+}
+
 function clearWasFixedFlags(st) {
   let touched = false;
   for (const id of Object.keys(st)) {
@@ -2123,12 +2146,16 @@ if (!gen.ok) {
   }
 
   { const stC = loadPatientState();
+    const benched = [];
     for (const r of col.rows) {
       if (r.status === 'done' && r.number && r.irn) {
         const ch = chronicSkip(stC, r.patientId);
-        if (ch) { r.status = 'skipped'; r.skip = ch; }
+        if (ch) { r.status = 'skipped'; r.skip = ch; benched.push(initialsOf(r.name)); }
       }
-    } }
+    }
+    // A silent bench is how the 20:06 run "checked" nobody and nobody knew.
+    if (benched.length) runlog('chronic-skip: ' + benched.length + ' patient(s) benched after 3 recent fails (auto-retry in <=3 days): ' + benched.join(', '));
+  }
   const checkable = col.rows.filter(r => r.status === 'done' && r.number && r.irn);
   const uncheckable = col.rows.filter(r => !(r.status === 'done' && r.number && r.irn));
   say(`Stage 3 of 3 — checking ${checkable.length} balance${checkable.length === 1 ? '' : 's'} in PRODA...`);
@@ -2549,9 +2576,12 @@ async function morningRun(trigger) {
     };
   });
 
-  for (const i of toCheck) {
-    const ch = chronicSkip(st, i.patientId);
-    if (ch && !hasFreshDetails(st, i.patientId)) { i.status = 'skipped'; i.skip = ch; }
+  { const benched = [];
+    for (const i of toCheck) {
+      const ch = chronicSkip(st, i.patientId);
+      if (ch && !hasFreshDetails(st, i.patientId)) { i.status = 'skipped'; i.skip = ch; benched.push(initialsOf(i.name)); }
+    }
+    if (benched.length) runlog('chronic-skip: ' + benched.length + ' patient(s) benched after 3 recent fails (auto-retry in <=3 days): ' + benched.join(', '));
   }
   const needDetails = toCheck.filter(i => !hasFreshDetails(st, i.patientId) && !i.skip);
   const cachedDetails = toCheck.filter(i => hasFreshDetails(st, i.patientId));
@@ -2850,12 +2880,16 @@ async function runManual(itemsIn) {
   }
 
   { const stC = loadPatientState();
+    const benched = [];
     for (const r of col.rows) {
       if (r.status === 'done' && r.number && r.irn) {
         const ch = chronicSkip(stC, r.patientId);
-        if (ch) { r.status = 'skipped'; r.skip = ch; }
+        if (ch) { r.status = 'skipped'; r.skip = ch; benched.push(initialsOf(r.name)); }
       }
-    } }
+    }
+    // A silent bench is how the 20:06 run "checked" nobody and nobody knew.
+    if (benched.length) runlog('chronic-skip: ' + benched.length + ' patient(s) benched after 3 recent fails (auto-retry in <=3 days): ' + benched.join(', '));
+  }
   const checkable = col.rows.filter(r => r.status === 'done' && r.number && r.irn);
   const uncheckable = col.rows.filter(r => !(r.status === 'done' && r.number && r.irn));
 
@@ -3410,7 +3444,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-12.1';
+const APP_BUILD = '2026-08-12.2';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -6488,6 +6522,7 @@ app.whenReady().then(async () => {
   try { await fleetSelfUpdate(); } catch (e) { /* start normally */ }
   createWindow(); proda.setLogger(runlog); principleReport.setLogger(runlog); maybeAutoRun();
   appJournal('app started');
+  healFurnitureStrikes();
   setTimeout(probePills, 20000);
   setInterval(probePills, 5 * 60 * 1000);
   // 6pm daily debrief: one Telegram message summarising every automation's

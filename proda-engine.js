@@ -723,6 +723,18 @@ async function findMedicareNumberInner(details) {
       return { ok: true, matches: res.matches || [] };
     }
   }
+  // Evidence at failure time: the reader only recognises a literal
+  // "Results (N)" heading. If HPOS words a no-match or a validation
+  // error any other way, we burn 25s and learn nothing - so photograph
+  // what the page actually said (digits masked) before giving up.
+  try {
+    const snap = await runInPage(`(() => {
+      const t = ((document.body ? document.body.innerText : '') || '').replace(/\\d{3,}/g, '###').replace(/\\s+/g, ' ').trim();
+      const i = t.search(/Results|No result|no match|not found|could not|error|invalid/i);
+      return { snip: (i >= 0 ? t.slice(Math.max(0, i - 40), i + 260) : t.slice(-300)) };
+    })()`);
+    if (snap && snap.snip) engineLog('find: page said (masked): "' + String(snap.snip).slice(0, 320) + '"');
+  } catch (e) { /* evidence only - never fail the run over it */ }
   return { ok: false, reason: 'no-results-appeared' };
 }
 
