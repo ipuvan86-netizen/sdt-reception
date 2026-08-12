@@ -2033,6 +2033,10 @@ function cdbsParked(i) {
   return n === -1 || (n >= 0 && n < 100 && !!cdbsBalInfo(i));
 }
 function cdbsBalChip(i) {
+  if (i.balanceIssue) {
+    const wI = i.balanceChecked ? new Date(i.balanceChecked).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' }) : '?';
+    return `<span class="chip" style="background:#fff4e0; color:#9a6b00; font-weight:700;">${esc(i.balanceIssue)} · ${wI}</span>`;
+  }
   const bm = cdbsBalInfo(i);
   if (!bm) return '<span class="chip" style="background:#f2f2f5; color:#6e6e73;">balance not checked yet</span>';
   const when = bm.when ? new Date(bm.when).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' }) : '?';
