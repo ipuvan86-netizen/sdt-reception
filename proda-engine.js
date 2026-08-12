@@ -647,12 +647,6 @@ function fillFindScript(details) {
 function readResultsScript() {
   return `(() => {
     const bodyText = (document.body ? document.body.innerText : '') || '';
-    // Medicare's definitive miss (seen 2026-08-12 for Y. J.): "A current
-    // valid Medicare card could not be found. Advise patient to contact
-    // Services Australia." - a real answer, not a timeout.
-    if (/current valid Medicare card could not be found/i.test(bodyText)) {
-      return { ready: true, count: 0, matches: [], said: 'no-valid-card' };
-    }
     const m = bodyText.match(/Results \\((\\d+)\\)/);
     if (!m) return { ready: false };
     const count = Number(m[1]);
@@ -740,7 +734,6 @@ async function findMedicareNumberInner(details) {
     await new Promise(r => setTimeout(r, 1000));
     const res = await runInPage(readResultsScript());
     if (res && res.ready) {
-      if (res.said === 'no-valid-card') engineLog('find: Medicare says no current valid card - patient should contact Services Australia');
       if (!res.count) return { ok: true, matches: [] };
       return { ok: true, matches: res.matches || [] };
     }
@@ -882,26 +875,8 @@ function balanceCheckScript(cardNumber, irn, firstName) {
     setValue(nameField, ${JSON.stringify(String(firstName || ''))});
     await sleep(250);
 
-    // Readback + visibility census (2026-08-12): "Please enter a Medicare
-    // card number" validations proved values are not surviving submission
-    // for some patients - report what the form actually holds, and whether
-    // HPOS has hidden the named controls (as it did to the Find button).
-    const isVis = el => !!(el && el.offsetParent !== null);
-    const held = {
-      cardLen: String(card.value || '').length,
-      irnLen: String(irnField.value || '').length,
-      nameLen: String(nameField.value || '').length,
-      cardVis: isVis(card), searchVis: isVis(search),
-    };
-    let via = 'named-button';
-    let clickTarget = search;
-    if (!isVis(search)) {
-      const alt = [...document.querySelectorAll('button, input[type=button], input[type=submit], a')]
-        .find(el => isVis(el) && /^(search|find)$/i.test(String(el.innerText || el.value || '').replace(/\\s+/g, ' ').trim()));
-      if (alt) { clickTarget = alt; via = 'visible-text-button'; }
-    }
-    clickTarget.click();
-    return { ok: true, step: 'submitted', via, held };
+    search.click();
+    return { ok: true, step: 'submitted' };
   })()`;
 }
 
@@ -977,8 +952,6 @@ async function checkBalance({ cardNumber, irn, firstName }) {
   if (!submitted || !submitted.ok) {
     return { ok: false, reason: 'could-not-submit', detail: submitted };
   }
-  engineLog('balance submit: via ' + (submitted.via || '?') + ' held ' + JSON.stringify(submitted.held || {})
-    + ' baseline ' + JSON.stringify(Object.keys(staticLines).map(s => String(s).slice(0, 40))));
 
   // Wait for the page to come back with an answer.
   let result = null;
@@ -1009,7 +982,6 @@ async function checkBalance({ cardNumber, irn, firstName }) {
     return { ok: true, text: result.eligibilityLine, eligibility: result.eligibilityLine };
   }
   if (result.errorLine) {
-    engineLog('balance flags at proda-said: stillOnForm=' + !!result.stillOnForm + ' hasNewSearch=' + !!result.hasNewSearch);
     return { ok: false, reason: 'proda-said', text: result.errorLine };
   }
   if (result.differLine) {
