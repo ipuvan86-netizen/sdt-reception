@@ -543,6 +543,7 @@ function findStateScript() {
       cardMode: has('cardNumber'),
       resultCount: m ? Number(m[1]) : null,
       hasFind: has('findByPersonalDetailsButton'),
+      hasVisibleFindText: [...document.querySelectorAll('button, input[type=button], input[type=submit], a')].some(el => el && el.offsetParent !== null && /^find$/i.test(String(el.innerText || el.value || '').replace(/\\s+/g, ' ').trim())),
     };
   })()`;
 }
@@ -624,9 +625,22 @@ function fillFindScript(details) {
     set(sur, ${JSON.stringify(String(details.surname || ''))});
     set(dob, ${JSON.stringify(String(details.dob8 || ''))});
     if (decl && !decl.checked) decl.click();
-    if (!find) return { ok: false, step: 'no-find-button' };
-    find.click();
-    return { ok: true };
+    // Submit ladder (2026-08-12): HPOS now hides the id'd Find button and
+    // shows a styled one instead - clicking the hidden element is a silent
+    // no-op (every search "ran" but the form never submitted; page-tail
+    // evidence showed the blank form after 25s, and hasFind read false).
+    const isVis = el => !!(el && el.offsetParent !== null && !el.disabled);
+    const txt = el => String(el.innerText || el.value || '').replace(/\\s+/g, ' ').trim();
+    let target = (find && isVis(find)) ? find : null;
+    let via = 'id-button';
+    if (!target) {
+      target = [...document.querySelectorAll('button, input[type=button], input[type=submit], a')]
+        .find(el => isVis(el) && /^find$/i.test(txt(el)));
+      via = 'visible-text-button';
+    }
+    if (!target) return { ok: false, step: 'no-find-button' };
+    target.click();
+    return { ok: true, via };
   })()`;
 }
 
@@ -714,6 +728,7 @@ async function findMedicareNumberInner(details) {
 
   const filled = await runInPage(fillFindScript(details));
   if (!filled || !filled.ok) return { ok: false, reason: 'could-not-fill-find', detail: filled && filled.step };
+  engineLog('find: submitted via ' + (filled.via || 'unknown'));
 
   for (let i = 0; i < 25; i++) {
     await new Promise(r => setTimeout(r, 1000));
