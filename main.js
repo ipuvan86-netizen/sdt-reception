@@ -689,6 +689,24 @@ function updateFailureMemory(items) {
 function healFurnitureStrikes() {
   try {
     const st = loadPatientState();
+    // One-off amnesty (runs once, marker-guarded): every strike in the file
+    // was earned while builds 2026-08-11.5-.8 mis-read furniture as replies,
+    // and the 20:06 bench pass re-labelled them 'No balance came back' -
+    // which the pattern heal below can't recognise. Wipe the lot once.
+    if (!st._strikeAmnesty) {
+      let wiped = 0;
+      for (const id of Object.keys(st)) {
+        const e = st[id];
+        if (e && typeof e === 'object' && (e.failCount || e.lastFailReason)) {
+          delete e.failCount; delete e.lastFailReason;
+          delete e.lastAttemptAt; delete e.firstFailedAt;
+          wiped++;
+        }
+      }
+      st._strikeAmnesty = '2026-08-12';
+      savePatientState(st);
+      appJournal('strike amnesty: ' + wiped + ' patient(s) cleared - every bench is lifted, all patients retry on the next run');
+    }
     const furniture = /Opens new window|Please enter a Medicare card|PRODA returned a message rather than a balance/i;
     let cleared = 0;
     for (const id of Object.keys(st)) {
@@ -2010,9 +2028,13 @@ function buildPreviewFromRows(rows) {
     else if (cls.kind === 'not-eligible') { balance = 'Not eligible'; note = notEligibleNote(); }
     else if (cls.kind === 'invalid') skip = INVALID_SKIP;
     else if (cls.kind === 'failed') {
-      skip = /invalid entry/i.test(r.resultText || '') ? INVALID_SKIP : (r.resultText || 'No balance came back');
+      // Keep the row's own skip reason when it has one (chronic-bench,
+      // no-card, etc). 2026-08-12: dropping it re-labelled benched rows
+      // "No balance came back", which counted as a brand-new strike every
+      // run - lastAttemptAt refreshed daily and the bench NEVER expired.
+      skip = r.skip || (/invalid entry/i.test(r.resultText || '') ? INVALID_SKIP : (r.resultText || 'No balance came back'));
     }
-    else if (cls.kind === 'empty') skip = r.resultText || 'No balance came back';
+    else if (cls.kind === 'empty') skip = r.skip || r.resultText || 'No balance came back';
     else skip = 'PRODA\'s reply was not understood: "' + String(cls.text || '').slice(0, 80) + '"';
     return {
       rowNumber: r.rowNumber || (idx + 2),
@@ -2510,6 +2532,11 @@ async function morningRun(trigger) {
   if (!canPhone || !s.prodaUsername || !s.prodaPassword) {
     return finishFail('Morning run is not set up yet - fill in the Morning run settings first.', false);
   }
+
+  // Wait out any in-flight Principle ensure instead of fighting it for the
+  // window (2026-08-12: a desk run 17s after boot lost the report screen to
+  // the startup home-nav and zombied on the calendar for 7 minutes).
+  try { await ensurePrincipleForJobs(); } catch (e) { /* stages re-check */ }
 
   markRanToday();
   await telegram.drainOld(s.telegramToken);
@@ -3444,7 +3471,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-12.2';
+const APP_BUILD = '2026-08-12.3';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
