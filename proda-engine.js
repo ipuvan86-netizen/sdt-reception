@@ -900,6 +900,27 @@ async function checkBalance({ cardNumber, irn, firstName }) {
   const form = await openCdbsForm();
   if (!form.ok) return { ok: false, reason: form.reason, detail: form.detail };
 
+  // Baseline read of the BLANK form. The CDBS page's own help text says
+  // "Please enter a Medicare card number", and the nav strip glues into
+  // sentence-shaped runs - both match the error keywords (discovered
+  // 2026-08-12: build 2026-08-11.8 reported this furniture as PRODA
+  // replies for a whole run). Any "error" sentence that already exists
+  // before we submit is page furniture, not an answer, and is ignored.
+  const baseline = await runInPage(readResultScript());
+  const staticLines = {};
+  if (baseline && !baseline.error) {
+    for (const k of ['errorLine', 'differLine', 'balanceLine', 'eligibilityLine']) {
+      if (baseline[k]) staticLines[baseline[k]] = true;
+    }
+  }
+  const dropFurniture = (r) => {
+    if (!r || r.error) return r;
+    for (const k of ['errorLine', 'differLine', 'balanceLine', 'eligibilityLine']) {
+      if (r[k] && staticLines[r[k]]) r[k] = '';
+    }
+    return r;
+  };
+
   const submitted = await runInPage(balanceCheckScript(cardNumber, irn, firstName));
   if (!submitted || !submitted.ok) {
     return { ok: false, reason: 'could-not-submit', detail: submitted };
@@ -911,7 +932,7 @@ async function checkBalance({ cardNumber, irn, firstName }) {
     await waitMs(400);
     if (!isOpen()) return { ok: false, reason: 'window-closed' };
     if (prodaWindow.webContents.isLoading()) continue;
-    result = await runInPage(readResultScript());
+    result = dropFurniture(await runInPage(readResultScript()));
     if (result && !result.error && (result.balanceLine || result.eligibilityLine || result.errorLine || result.differLine)) break;
   }
 
