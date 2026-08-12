@@ -543,7 +543,6 @@ function findStateScript() {
       cardMode: has('cardNumber'),
       resultCount: m ? Number(m[1]) : null,
       hasFind: has('findByPersonalDetailsButton'),
-      hasVisibleFindText: [...document.querySelectorAll('button, input[type=button], input[type=submit], a')].some(el => el && el.offsetParent !== null && /^find$/i.test(String(el.innerText || el.value || '').replace(/\\s+/g, ' ').trim())),
     };
   })()`;
 }
@@ -625,34 +624,15 @@ function fillFindScript(details) {
     set(sur, ${JSON.stringify(String(details.surname || ''))});
     set(dob, ${JSON.stringify(String(details.dob8 || ''))});
     if (decl && !decl.checked) decl.click();
-    // Submit ladder (2026-08-12): HPOS now hides the id'd Find button and
-    // shows a styled one instead - clicking the hidden element is a silent
-    // no-op (every search "ran" but the form never submitted; page-tail
-    // evidence showed the blank form after 25s, and hasFind read false).
-    const isVis = el => !!(el && el.offsetParent !== null && !el.disabled);
-    const txt = el => String(el.innerText || el.value || '').replace(/\\s+/g, ' ').trim();
-    let target = (find && isVis(find)) ? find : null;
-    let via = 'id-button';
-    if (!target) {
-      target = [...document.querySelectorAll('button, input[type=button], input[type=submit], a')]
-        .find(el => isVis(el) && /^find$/i.test(txt(el)));
-      via = 'visible-text-button';
-    }
-    if (!target) return { ok: false, step: 'no-find-button' };
-    target.click();
-    return { ok: true, via };
+    if (!find) return { ok: false, step: 'no-find-button' };
+    find.click();
+    return { ok: true };
   })()`;
 }
 
 function readResultsScript() {
   return `(() => {
     const bodyText = (document.body ? document.body.innerText : '') || '';
-    // Medicare's definitive miss (seen 2026-08-12 for Y. J.): "A current
-    // valid Medicare card could not be found. Advise patient to contact
-    // Services Australia." - a real answer, not a timeout.
-    if (/current valid Medicare card could not be found/i.test(bodyText)) {
-      return { ready: true, count: 0, matches: [], said: 'no-valid-card' };
-    }
     const m = bodyText.match(/Results \\((\\d+)\\)/);
     if (!m) return { ready: false };
     const count = Number(m[1]);
@@ -734,29 +714,15 @@ async function findMedicareNumberInner(details) {
 
   const filled = await runInPage(fillFindScript(details));
   if (!filled || !filled.ok) return { ok: false, reason: 'could-not-fill-find', detail: filled && filled.step };
-  engineLog('find: submitted via ' + (filled.via || 'unknown'));
 
   for (let i = 0; i < 25; i++) {
     await new Promise(r => setTimeout(r, 1000));
     const res = await runInPage(readResultsScript());
     if (res && res.ready) {
-      if (res.said === 'no-valid-card') engineLog('find: Medicare says no current valid card - patient should contact Services Australia');
       if (!res.count) return { ok: true, matches: [] };
       return { ok: true, matches: res.matches || [] };
     }
   }
-  // Evidence at failure time: the reader only recognises a literal
-  // "Results (N)" heading. If HPOS words a no-match or a validation
-  // error any other way, we burn 25s and learn nothing - so photograph
-  // what the page actually said (digits masked) before giving up.
-  try {
-    const snap = await runInPage(`(() => {
-      const t = ((document.body ? document.body.innerText : '') || '').replace(/\\d{3,}/g, '###').replace(/\\s+/g, ' ').trim();
-      const i = t.search(/Results|No result|no match|not found|could not|error|invalid/i);
-      return { snip: (i >= 0 ? t.slice(Math.max(0, i - 40), i + 260) : t.slice(-300)) };
-    })()`);
-    if (snap && snap.snip) engineLog('find: page said (masked): "' + String(snap.snip).slice(0, 320) + '"');
-  } catch (e) { /* evidence only - never fail the run over it */ }
   return { ok: false, reason: 'no-results-appeared' };
 }
 
@@ -882,26 +848,8 @@ function balanceCheckScript(cardNumber, irn, firstName) {
     setValue(nameField, ${JSON.stringify(String(firstName || ''))});
     await sleep(250);
 
-    // Readback + visibility census (2026-08-12): "Please enter a Medicare
-    // card number" validations proved values are not surviving submission
-    // for some patients - report what the form actually holds, and whether
-    // HPOS has hidden the named controls (as it did to the Find button).
-    const isVis = el => !!(el && el.offsetParent !== null);
-    const held = {
-      cardLen: String(card.value || '').length,
-      irnLen: String(irnField.value || '').length,
-      nameLen: String(nameField.value || '').length,
-      cardVis: isVis(card), searchVis: isVis(search),
-    };
-    let via = 'named-button';
-    let clickTarget = search;
-    if (!isVis(search)) {
-      const alt = [...document.querySelectorAll('button, input[type=button], input[type=submit], a')]
-        .find(el => isVis(el) && /^(search|find)$/i.test(String(el.innerText || el.value || '').replace(/\\s+/g, ' ').trim()));
-      if (alt) { clickTarget = alt; via = 'visible-text-button'; }
-    }
-    clickTarget.click();
-    return { ok: true, step: 'submitted', via, held };
+    search.click();
+    return { ok: true, step: 'submitted' };
   })()`;
 }
 
@@ -929,10 +877,7 @@ function readResultScript() {
     const differMatch = text.match(/([^.]*matched using the submitted data[^.]*\\.)/i);
 
     // Anything that reads like an error or a warning.
-    // 2026-08-11: Services Australia reworded its rejections ("is not
-    // valid", "could not be matched to Services Australia's records") -
-    // sentence-style match so the keyword can sit anywhere in the line.
-    const errorMatch = text.match(/([^.]*(?:We could not|Unable to|No match|not found|invalid|incorrect|does not match|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card)[^.]*\\.)/i);
+    const errorMatch = text.match(/((?:We could not|Unable to|No match|not found|invalid|incorrect|does not match)[^.]*\\.)/i);
 
     return {
       balanceLine: take(balanceMatch),
@@ -952,33 +897,10 @@ async function checkBalance({ cardNumber, irn, firstName }) {
   const form = await openCdbsForm();
   if (!form.ok) return { ok: false, reason: form.reason, detail: form.detail };
 
-  // Baseline read of the BLANK form. The CDBS page's own help text says
-  // "Please enter a Medicare card number", and the nav strip glues into
-  // sentence-shaped runs - both match the error keywords (discovered
-  // 2026-08-12: build 2026-08-11.8 reported this furniture as PRODA
-  // replies for a whole run). Any "error" sentence that already exists
-  // before we submit is page furniture, not an answer, and is ignored.
-  const baseline = await runInPage(readResultScript());
-  const staticLines = {};
-  if (baseline && !baseline.error) {
-    for (const k of ['errorLine', 'differLine', 'balanceLine', 'eligibilityLine']) {
-      if (baseline[k]) staticLines[baseline[k]] = true;
-    }
-  }
-  const dropFurniture = (r) => {
-    if (!r || r.error) return r;
-    for (const k of ['errorLine', 'differLine', 'balanceLine', 'eligibilityLine']) {
-      if (r[k] && staticLines[r[k]]) r[k] = '';
-    }
-    return r;
-  };
-
   const submitted = await runInPage(balanceCheckScript(cardNumber, irn, firstName));
   if (!submitted || !submitted.ok) {
     return { ok: false, reason: 'could-not-submit', detail: submitted };
   }
-  engineLog('balance submit: via ' + (submitted.via || '?') + ' held ' + JSON.stringify(submitted.held || {})
-    + ' baseline ' + JSON.stringify(Object.keys(staticLines).map(s => String(s).slice(0, 40))));
 
   // Wait for the page to come back with an answer.
   let result = null;
@@ -986,7 +908,7 @@ async function checkBalance({ cardNumber, irn, firstName }) {
     await waitMs(400);
     if (!isOpen()) return { ok: false, reason: 'window-closed' };
     if (prodaWindow.webContents.isLoading()) continue;
-    result = dropFurniture(await runInPage(readResultScript()));
+    result = await runInPage(readResultScript());
     if (result && !result.error && (result.balanceLine || result.eligibilityLine || result.errorLine || result.differLine)) break;
   }
 
@@ -1009,7 +931,6 @@ async function checkBalance({ cardNumber, irn, firstName }) {
     return { ok: true, text: result.eligibilityLine, eligibility: result.eligibilityLine };
   }
   if (result.errorLine) {
-    engineLog('balance flags at proda-said: stillOnForm=' + !!result.stillOnForm + ' hasNewSearch=' + !!result.hasNewSearch);
     return { ok: false, reason: 'proda-said', text: result.errorLine };
   }
   if (result.differLine) {

@@ -627,7 +627,7 @@ function classifyProda(raw) {
     return { kind: 'balance', value: bal[2] ? amount + ' as at ' + bal[2] : amount };
   }
   if (/not eligible/i.test(text)) return { kind: 'not-eligible' };
-  if (/invalid entry|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(text)) return { kind: 'invalid' };
+  if (/invalid entry/i.test(text)) return { kind: 'invalid' };
   const numeric = text.replace(/[$,\s]/g, '');
   if (numeric !== '' && !isNaN(Number(numeric))) {
     return { kind: 'balance', value: '$' + Number(numeric).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) };
@@ -678,47 +678,6 @@ function updateFailureMemory(items) {
   }
   savePatientState(st);
   return st;
-}
-
-// One-off self-heal (2026-08-12): builds 2026-08-11.5 through .8 read the
-// CDBS form's own furniture ("Opens new window...", "Please enter a
-// Medicare card number") as PRODA error replies, so every burned run gave
-// every patient a false strike. Three false strikes = chronic-skip, which
-// is why the 20:06 auto job checked NOBODY. Wipe strikes whose recorded
-// reason is that furniture; real failures keep their strikes.
-function healFurnitureStrikes() {
-  try {
-    const st = loadPatientState();
-    // One-off amnesty (runs once, marker-guarded): every strike in the file
-    // was earned while builds 2026-08-11.5-.8 mis-read furniture as replies,
-    // and the 20:06 bench pass re-labelled them 'No balance came back' -
-    // which the pattern heal below can't recognise. Wipe the lot once.
-    if (!st._strikeAmnesty) {
-      let wiped = 0;
-      for (const id of Object.keys(st)) {
-        const e = st[id];
-        if (e && typeof e === 'object' && (e.failCount || e.lastFailReason)) {
-          delete e.failCount; delete e.lastFailReason;
-          delete e.lastAttemptAt; delete e.firstFailedAt;
-          wiped++;
-        }
-      }
-      st._strikeAmnesty = '2026-08-12';
-      savePatientState(st);
-      appJournal('strike amnesty: ' + wiped + ' patient(s) cleared - every bench is lifted, all patients retry on the next run');
-    }
-    const furniture = /Opens new window|Please enter a Medicare card|PRODA returned a message rather than a balance/i;
-    let cleared = 0;
-    for (const id of Object.keys(st)) {
-      const e = st[id];
-      if (e && e.lastFailReason && furniture.test(e.lastFailReason)) {
-        delete e.failCount; delete e.lastFailReason;
-        delete e.lastAttemptAt; delete e.firstFailedAt;
-        cleared++;
-      }
-    }
-    if (cleared) { savePatientState(st); appJournal('strike memory healed: ' + cleared + ' patient(s) cleared of false furniture-reply strikes'); }
-  } catch (e) { appJournal('strike memory heal failed: ' + String(e).slice(0, 100)); }
 }
 
 function clearWasFixedFlags(st) {
@@ -1076,7 +1035,7 @@ async function pinFreshNote(patientId, noteText, patientName) {
         await new Promise(r => setTimeout(r, 900));
         const after = await win.webContents.executeJavaScript(pinScript(snippet, 'verify'), true);
         const solid = after && after.census && after.census.some(c => c.icon === 'bookmark' && (c.mine || c.cdbs));
-        if (solid) { pinAudit.pinned++; runlog('  pin verified solid'); return true; }
+        if (solid) { pinAudit.pinned++; runlog('  pin verified solid'); return; }
         runlog('  pin click did not stick - trying again');
       }
       await new Promise(r => setTimeout(r, 2000));
@@ -1539,16 +1498,10 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
     if (!res.ok && res.reason === 'nothing-returned' && sessionLooksAlive) {
       runlog('  empty reply with a healthy session - the patient, not the session; session rungs skipped');
     } else if (!res.ok && res.reason !== 'signed-out' && !res.text) {
-      runlog('  empty reply - photographing the page, then re-entering HPOS and retrying this patient');
-      await logFormForensics('empty reply, patient ' + (i + 1));
       onProgress(i, items.length, item, 'working', '');
       await proda.enterHpos();
       proda.parkOffscreen();
       res = await proda.checkBalance({ cardNumber: item.number, irn: item.irn, firstName: firstNameOf(1) });
-      if (!res.ok && !res.text) {
-        runlog('  still empty after re-entering HPOS' + (typeof recoverLogin === 'function' ? ' - trying a fresh login' : ' - no fresh-login rung in this mode'));
-        await logFormForensics('still empty after re-enter, patient ' + (i + 1));
-      }
       if (!res.ok && !res.text && typeof recoverLogin === 'function') {
         const back = await recoverLogin('The PRODA session looks dead partway through — logging in again.');
         if (back) {
@@ -1568,13 +1521,13 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
       await logFormForensics('after heal');
     }
     runlog('patient ' + (i + 1) + ' "' + item.name + '": reply=' + (res.ok ? 'ok' : (res.reason || 'fail')) + ' text="' + String(res.text || '').slice(0, 60) + '"');
-    if (!(!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(res.text))) {
+    if (!(!res.ok && res.text && /invalid entry|matched using the submitted data/i.test(res.text))) {
       if (!res.ok && !item.dob) runlog('  healing skipped: no date of birth on the row');
     }
-    if (!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(res.text) && !item.dob) {
+    if (!res.ok && res.text && /invalid entry|matched using the submitted data/i.test(res.text) && !item.dob) {
       runlog('  healing skipped: invalid entry but no date of birth on the row');
     }
-    if (!res.ok && res.text && /invalid entry|matched using the submitted data|not valid|could not be matched|cannot be matched|could not be found|cannot be found|Please enter a Medicare card/i.test(res.text) && item.dob) {
+    if (!res.ok && res.text && /invalid entry|matched using the submitted data/i.test(res.text) && item.dob) {
       runlog('  healing attempt: dob=' + item.dob);
       const dob8 = dob8Of(item.dob);
       const nm = splitName(item.name);
@@ -1585,7 +1538,6 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
         if (found.ok && found.matches && found.matches.length === 1) {
           const fm = found.matches[0];
           res = await proda.checkBalance({ cardNumber: fm.cardNumber, irn: fm.irn, firstName: nm.first });
-          runlog('  heal check with found card: ' + (res.ok ? ('ok - ' + String(res.text || '').slice(0, 50)) : ('failed - ' + String(res.text || res.reason || '').slice(0, 50))));
           if (res.ok) {
             item.healed = true;
             item.foundNumber = fm.cardNumber; item.foundIrn = fm.irn; item.foundExpiry = fm.expiry;
@@ -1609,7 +1561,6 @@ async function balanceCore(items, onProgress, waitState, recoverLogin) {
       const detail = res.text || balanceReasonText(res.reason, res.detail);
       rows.push({ ...item, balanceText: res.text || '', resultText: detail, status: 'failed' });
       onProgress(i, items.length, item, 'failed', detail);
-      if (res.text) consecutiveFormFails = 0;   // a recognised reply proves the form works
       if (!res.text) {
         consecutiveFormFails++;
         if (consecutiveFormFails >= 3) {
@@ -2028,13 +1979,9 @@ function buildPreviewFromRows(rows) {
     else if (cls.kind === 'not-eligible') { balance = 'Not eligible'; note = notEligibleNote(); }
     else if (cls.kind === 'invalid') skip = INVALID_SKIP;
     else if (cls.kind === 'failed') {
-      // Keep the row's own skip reason when it has one (chronic-bench,
-      // no-card, etc). 2026-08-12: dropping it re-labelled benched rows
-      // "No balance came back", which counted as a brand-new strike every
-      // run - lastAttemptAt refreshed daily and the bench NEVER expired.
-      skip = r.skip || (/invalid entry/i.test(r.resultText || '') ? INVALID_SKIP : (r.resultText || 'No balance came back'));
+      skip = /invalid entry/i.test(r.resultText || '') ? INVALID_SKIP : (r.resultText || 'No balance came back');
     }
-    else if (cls.kind === 'empty') skip = r.skip || r.resultText || 'No balance came back';
+    else if (cls.kind === 'empty') skip = r.resultText || 'No balance came back';
     else skip = 'PRODA\'s reply was not understood: "' + String(cls.text || '').slice(0, 80) + '"';
     return {
       rowNumber: r.rowNumber || (idx + 2),
@@ -2168,16 +2115,12 @@ if (!gen.ok) {
   }
 
   { const stC = loadPatientState();
-    const benched = [];
     for (const r of col.rows) {
       if (r.status === 'done' && r.number && r.irn) {
         const ch = chronicSkip(stC, r.patientId);
-        if (ch) { r.status = 'skipped'; r.skip = ch; benched.push(initialsOf(r.name)); }
+        if (ch) { r.status = 'skipped'; r.skip = ch; }
       }
-    }
-    // A silent bench is how the 20:06 run "checked" nobody and nobody knew.
-    if (benched.length) runlog('chronic-skip: ' + benched.length + ' patient(s) benched after 3 recent fails (auto-retry in <=3 days): ' + benched.join(', '));
-  }
+    } }
   const checkable = col.rows.filter(r => r.status === 'done' && r.number && r.irn);
   const uncheckable = col.rows.filter(r => !(r.status === 'done' && r.number && r.irn));
   say(`Stage 3 of 3 — checking ${checkable.length} balance${checkable.length === 1 ? '' : 's'} in PRODA...`);
@@ -2231,9 +2174,6 @@ if (!gen.ok) {
         e.lastBalanceText = r.balanceText;
         stR[r.patientId] = e;
         mirrorBalanceToItem(r.patientId, r.balanceText);
-      } else if (r.status === 'failed' && r.patientId) {
-        const issue = issueFromReply(r.resultText);
-        if (issue) { mirrorIssueToItem(r.patientId, issue); runlog('  card issue recorded for "' + initialsOf(r.name) + '": ' + issue); }
       }
     }
     savePatientState(stR);
@@ -2536,11 +2476,6 @@ async function morningRun(trigger) {
     return finishFail('Morning run is not set up yet - fill in the Morning run settings first.', false);
   }
 
-  // Wait out any in-flight Principle ensure instead of fighting it for the
-  // window (2026-08-12: a desk run 17s after boot lost the report screen to
-  // the startup home-nav and zombied on the calendar for 7 minutes).
-  try { await ensurePrincipleForJobs(); } catch (e) { /* stages re-check */ }
-
   markRanToday();
   await telegram.drainOld(s.telegramToken);
 
@@ -2606,12 +2541,9 @@ async function morningRun(trigger) {
     };
   });
 
-  { const benched = [];
-    for (const i of toCheck) {
-      const ch = chronicSkip(st, i.patientId);
-      if (ch && !hasFreshDetails(st, i.patientId)) { i.status = 'skipped'; i.skip = ch; benched.push(initialsOf(i.name)); }
-    }
-    if (benched.length) runlog('chronic-skip: ' + benched.length + ' patient(s) benched after 3 recent fails (auto-retry in <=3 days): ' + benched.join(', '));
+  for (const i of toCheck) {
+    const ch = chronicSkip(st, i.patientId);
+    if (ch && !hasFreshDetails(st, i.patientId)) { i.status = 'skipped'; i.skip = ch; }
   }
   const needDetails = toCheck.filter(i => !hasFreshDetails(st, i.patientId) && !i.skip);
   const cachedDetails = toCheck.filter(i => hasFreshDetails(st, i.patientId));
@@ -2702,9 +2634,6 @@ async function morningRun(trigger) {
       e.lastBalanceText = r.balanceText;
       st[r.patientId] = e;
       mirrorBalanceToItem(r.patientId, r.balanceText);
-    } else if (r.status === 'failed' && r.patientId) {
-      const issue = issueFromReply(r.resultText);
-      if (issue) { mirrorIssueToItem(r.patientId, issue); runlog('  card issue recorded for "' + initialsOf(r.name) + '": ' + issue); }
     }
   }
   savePatientState(st);
@@ -2913,16 +2842,12 @@ async function runManual(itemsIn) {
   }
 
   { const stC = loadPatientState();
-    const benched = [];
     for (const r of col.rows) {
       if (r.status === 'done' && r.number && r.irn) {
         const ch = chronicSkip(stC, r.patientId);
-        if (ch) { r.status = 'skipped'; r.skip = ch; benched.push(initialsOf(r.name)); }
+        if (ch) { r.status = 'skipped'; r.skip = ch; }
       }
-    }
-    // A silent bench is how the 20:06 run "checked" nobody and nobody knew.
-    if (benched.length) runlog('chronic-skip: ' + benched.length + ' patient(s) benched after 3 recent fails (auto-retry in <=3 days): ' + benched.join(', '));
-  }
+    } }
   const checkable = col.rows.filter(r => r.status === 'done' && r.number && r.irn);
   const uncheckable = col.rows.filter(r => !(r.status === 'done' && r.number && r.irn));
 
@@ -2955,9 +2880,6 @@ async function runManual(itemsIn) {
         e.lastBalanceText = r.balanceText;
         stR[r.patientId] = e;
         mirrorBalanceToItem(r.patientId, r.balanceText);
-      } else if (r.status === 'failed' && r.patientId) {
-        const issue = issueFromReply(r.resultText);
-        if (issue) { mirrorIssueToItem(r.patientId, issue); runlog('  card issue recorded for "' + initialsOf(r.name) + '": ' + issue); }
       }
     }
     savePatientState(stR);
@@ -3264,7 +3186,7 @@ async function fbToken() {
   return fbTokInFlight;
 }
 
-const ACTION_KEYS = ['patientId', 'name', 'kind', 'text', 'context', 'token', 'createdAt', 'doneAt', 'doneNote', 'updatedAt', 'section', 'due', 'assignee', 'repeat', 'stageDentist', 'stageReception', 'noteText', 'howTo', 'escalated', 'outcome', 'attempts', 'principleWritten', 'plink', 'mobile', 'feeSched', 'lastVisit', 'notesLog', 'dob', 'deleted', 'balanceText', 'balanceChecked', 'parked', 'parkedAt', 'balanceIssue', 'chaseFlag', 'viewsTag', 'viewsList', 'viewsRules', 'smsSentAt'];
+const ACTION_KEYS = ['patientId', 'name', 'kind', 'text', 'context', 'token', 'createdAt', 'doneAt', 'doneNote', 'updatedAt', 'section', 'due', 'assignee', 'repeat', 'stageDentist', 'stageReception', 'noteText', 'howTo', 'escalated', 'outcome', 'attempts', 'principleWritten', 'plink', 'mobile', 'feeSched', 'lastVisit', 'notesLog', 'dob', 'deleted', 'balanceText', 'balanceChecked', 'parked', 'parkedAt', 'chaseFlag', 'viewsTag', 'viewsList', 'viewsRules', 'smsSentAt'];
 function itemToFields(it) {
   const f = {};
   for (const k of ACTION_KEYS) if (it[k] != null && it[k] !== '') f[k] = { stringValue: String(it[k]) };
@@ -3317,32 +3239,6 @@ async function fsChangedSince(t, sinceIso) {
 // to the oldest. Losers get tombstones.
 // Balance results mirror onto the matching Reactivation CDBS card in the
 // shared list, so the work-from-home page can wear the same chips.
-// Services Australia rejection -> a plain-English chip for the reactivation
-// card. Recording it (with a checked date) drops the patient out of the
-// "unchecked" pool, so the same rejections stop re-burning 45s each on
-// every button press; the refresh scope revisits them after a fortnight.
-// Unknown replies and "Please enter a Medicare card number" (an app-side
-// fill problem) return null and stay in the pool.
-function issueFromReply(text) {
-  const t = String(text || '');
-  if (/card number entered is not valid/i.test(t)) return 'Card number not valid - confirm card with family';
-  if (/could not be matched to Services Australia/i.test(t)) return 'Details do not match Medicare - confirm name, DOB and card with family';
-  if (/current valid Medicare card could not be found/i.test(t)) return 'No current Medicare card - family to contact Services Australia';
-  return null;
-}
-
-function mirrorIssueToItem(patientId, issueText) {
-  try {
-    if (!itemsStore.byId) return;
-    const it = Object.values(itemsStore.byId).find(x => x.kind === 'reactcdbs' && x.patientId === patientId && !x.deleted);
-    if (!it) return;
-    it.balanceIssue = String(issueText || '').slice(0, 120);
-    it.balanceText = it.balanceIssue;      // joins the normal freshness cycle
-    it.balanceChecked = new Date().toISOString();
-    fsPush(it);
-  } catch (e) { /* mirror is best-effort */ }
-}
-
 function mirrorBalanceToItem(patientId, balanceText) {
   try {
     if (!itemsStore.byId) return;
@@ -3350,7 +3246,6 @@ function mirrorBalanceToItem(patientId, balanceText) {
     if (!it) return;
     it.balanceText = String(balanceText || '').slice(0, 200);
     it.balanceChecked = new Date().toISOString();
-    delete it.balanceIssue;   // a real answer replaces any recorded card issue
     fsPush(it);
   } catch (e) { /* mirror is best-effort */ }
 }
@@ -3507,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-12.6';
+const APP_BUILD = '2026-08-13.1';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -3532,13 +3427,13 @@ function redactNames(text) {
     for (const k of Object.keys(st)) if (st[k] && st[k].name) names.add(String(st[k].name).trim());
     try { for (const it of (loadActions().items || [])) if (it.name) names.add(String(it.name).trim()); } catch (e) { /* actions optional */ }
     for (const full of names) {
-      if (full.length < 6 || !(full.includes(' ') || full.includes('-'))) continue;
-      const parts = full.split(/[\s-]+/).filter(Boolean);
+      if (full.length < 6 || !full.includes(' ')) continue;
+      const parts = full.split(/\s+/);
       const initials = parts.map((p) => p[0] + '.').join(' ');
       // Whitespace-insensitive so "Demi  Schneider" (double space in the
       // report) still masks; each part regex-escaped so names containing
       // brackets like "((dental))" are safe.
-      const rx = new RegExp(parts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s-]+'), 'g');
+      const rx = new RegExp(parts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
       text = text.replace(rx, initials);
     }
   } catch (e) { /* redaction is best-effort; the secret link still protects */ }
@@ -3560,7 +3455,6 @@ async function uploadDebugFeed(force) {
     } catch (e) { blob = '(no logs found for today)'; }
     if (blob.length > 750 * 1024) blob = '...(older lines trimmed)...\n' + blob.slice(-750 * 1024);
     blob = redactNames(blob);
-    blob = blob.replace(/\d{5,}/g, '###');   // card + phone numbers never leave the machine
     let stats = [];
     try {
       const runs = await fleetRuns();
@@ -3994,7 +3888,7 @@ async function updateActionList(buckets) {
   return a;
 }
 
-const NURSE_PAGE_HTML = '<!DOCTYPE html>\n<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n<title>SDT Reception — Action List</title>\n<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>\n<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>\n<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>\n<style>\nbody{font-family:-apple-system,\'Segoe UI\',system-ui,sans-serif;background:#f5f5f7;color:#1d1d1f;margin:0;padding:20px;max-width:680px;margin:0 auto;}\nh1{font-size:24px;letter-spacing:-.4px;} .card{background:#fff;border-radius:16px;padding:18px;margin-top:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);}\n.row{display:flex;gap:8px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f0f0f3;flex-wrap:wrap;}\n.muted{color:#6e6e73;font-size:13px;} input[type=checkbox]{width:20px;height:20px;margin-top:2px;}\ninput[type=text],input[type=date],select{font:inherit;border:1px solid #d2d2d7;border-radius:10px;padding:7px 10px;font-size:13px;}\nbutton{font:inherit;border:none;border-radius:99px;padding:8px 16px;font-weight:600;cursor:pointer;background:#2F6B4F;color:#fff;}\n.pill{display:inline-block;border-radius:99px;padding:5px 12px;font-size:12px;font-weight:600;}\n.good{background:#e6f4ec;color:#1d7a46;} .warn{background:#fff4e0;color:#9a6b00;} .bad{background:#fdecec;color:#c0392b;}\n.chip{display:inline-block;background:#ececf0;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:600;margin-left:6px;}\n.over{color:#c0392b;font-weight:600;} s{color:#a0a0a5;} details{margin-top:8px;} summary{cursor:pointer;font-weight:650;padding:6px 0;list-style:none;}\ndetails.dept>summary .ci::before{content:\'+\';}details.dept[open]>summary .ci::before{content:\'\\2212\';}.row{padding:11px 0;}</style></head><body>\n<h1>SDT Lists <span id="st" class="pill warn">connecting…</span></h1>\n<div id="tabs" style="display:none; gap:8px; margin:10px 0;">\n  <button onclick="setTab(\'list\')" id="tabList" style="border:none; border-radius:99px; padding:7px 16px; font-weight:700; cursor:pointer; background:#2F6B4F; color:#fff;">Action list</button>\n  <button onclick="setTab(\'react\')" id="tabReact" style="border:none; border-radius:99px; padding:7px 16px; font-weight:700; cursor:pointer; background:#f2f2f5; color:#3c3c43;">Reactivation calls</button>\n  <select id="vw" onchange="vwSel(this.value)" style="font:inherit;border:1px solid #d2d2d7;border-radius:9px;padding:6px 8px;max-width:170px;"></select>\n  <input type="text" id="rq" placeholder="search patients…" oninput="window._tab===\'react\'&&renderReactPage(window._all)" style="margin-left:auto; font:inherit; border:1px solid #d2d2d7; border-radius:9px; padding:6px 10px; width:210px;">\n</div>\n<div id="reactPage" style="display:none;"></div>\n<div id="gate" style="display:block; text-align:center; margin-top:40px;">\n  <div class="card" style="display:block;">\n    <div style="font-weight:700; font-size:17px;">Staff sign-in</div>\n    <div class="muted" id="gateMsg" style="margin:8px 0 14px;">Sign in with your clinic Google account to open the Action List.</div>\n    <button onclick="doSignIn()" style="font-size:14px;">Sign in with Google</button>\n  </div>\n</div>\n<div class="card" id="mainCard" style="display:none;">\n  \n  <div id="open" class="muted" style="margin-top:10px;">Loading…</div>\n  <details><summary class="muted">Done this fortnight (<span id="dc">0</span>)</summary><div id="done"></div></details>\n</div>\n<script>\nfirebase.initializeApp({apiKey:"AIzaSyBFrr_cvA4j2RA_Ern6z6AJk-pahPv2qHU",authDomain:"inv-c20f7.firebaseapp.com",projectId:"inv-c20f7"});\nconst db=firebase.firestore(); const esc=s=>String(s||\'\').replace(/[&<>"]/g,c=>({\'&\':\'&amp;\',\'<\':\'&lt;\',\'>\':\'&gt;\',\'"\':\'&quot;\'}[c]));\nconst age=iso=>{const d=Math.floor((Date.now()-Date.parse(iso))/86400000);return d<=0?\'today\':d===1?\'yesterday\':d+\' days\';};\nconst signedInUI=ok=>{document.getElementById(\'gate\').style.display=ok?\'none\':\'block\';document.getElementById(\'mainCard\').style.display=ok?\'block\':\'none\';};\nfunction doSignIn(){firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>{document.getElementById(\'st\').className=\'pill bad\';document.getElementById(\'st\').textContent=\'sign-in failed\';});}\nvar _rt=null,_pend=null;\nfunction paintSoon(fn){_pend=fn;if(_rt)return;_rt=setTimeout(function(){_rt=null;var f=_pend;_pend=null;if(document.hidden){_pend=f;return;}f();},220);}\ndocument.addEventListener(\'visibilitychange\',function(){if(!document.hidden&&_pend){var f=_pend;_pend=null;f();}});\nfunction startData(){\n  db.collection(\'cdbsActions\').onSnapshot(function(snap){window._snapLast=snap;paintSoon(function(){paintSnap(snap);});});\n}\nfunction paintSnap(snap){\n    document.getElementById(\'st\').className=\'pill good\'; document.getElementById(\'st\').textContent=\'live\';\n    let items=[]; snap.forEach(d=>items.push({id:d.id,...d.data()}));\n    const tod=(()=>{const d=new Date();return d.getFullYear()+\'-\'+String(d.getMonth()+1).padStart(2,\'0\')+\'-\'+String(d.getDate()).padStart(2,\'0\');})();window._sch=window._sch||{};items=items.filter(function(i){return !i.deleted;});var _vc=items.find(function(i){return i.id===\'_viewsConfig\';})||{};window._vcfg={views:[],rules:{}};try{window._vcfg.views=JSON.parse(_vc.viewsList||\'[]\');}catch(e){}try{window._vcfg.rules=JSON.parse(_vc.viewsRules||\'{}\');}catch(e){}items=items.filter(function(i){return i.id!==\'_viewsConfig\'&&i.kind!==\'viewscfg\';});vwFill(items);window._all=items.slice();document.getElementById(\'tabs\').style.display=\'flex\';if(window._tab===\'react\'){renderReactPage(items);return;}document.getElementById(\'reactPage\').style.display=\'none\';document.getElementById(\'open\').style.display=\'\';document.getElementById(\'dc\')&&(document.getElementById(\'dc\').parentElement.style.display=\'\');items=items.filter(i=>i.kind!==\'reactivation\'&&i.kind!==\'reactcdbs\');items=items.filter(vwPass);const sched=items.filter(i=>!i.doneAt&&i.due&&i.due>tod).sort((a,b)=>String(a.due).localeCompare(String(b.due)));const parked=items.filter(i=>!i.doneAt&&i.parked);const open=items.filter(i=>!i.doneAt&&!(i.due&&i.due>tod)&&!i.parked), done=items.filter(i=>i.doneAt&&(Date.now()-Date.parse(i.doneAt))<((i.kind===\'unpaid\'?60:14)*86400000));\n    const today=new Date().toISOString().slice(0,10);\n    const row=i=>{const od=i.due&&i.due<today;const ov=i.kind===\'unpaid\'&&i.escalated&&!i.doneAt;\n      if(i.kind===\'checkout\'||i.kind===\'rebook\'||i.kind===\'recall\'){\n        return `<div class="row" style="${(i.stageDentist||i.stageReception)?\'background:#fafdfb;border-radius:10px;\':\'\'}">\n        <span style="display:inline-flex;gap:6px;">\n          <label style="display:inline-flex;align-items:center;gap:4px;background:${i.stageDentist?\'#e6f4ec\':\'#f2f2f5\'};border-radius:99px;padding:4px 10px;font-size:12px;font-weight:600;color:${i.stageDentist?\'#1d7a46\':\'#6e6e73\'};"><input type="checkbox" ${i.stageDentist?\'checked\':\'\'} onchange="stage(\'${i.id}\',\'stageDentist\',this.checked)">Dentist</label>\n          <label style="display:inline-flex;align-items:center;gap:4px;background:${i.stageReception?\'#e6f4ec\':\'#f2f2f5\'};border-radius:99px;padding:4px 10px;font-size:12px;font-weight:600;color:${i.stageReception?\'#1d7a46\':\'#6e6e73\'};"><input type="checkbox" ${i.stageReception?\'checked\':\'\'} onchange="stage(\'${i.id}\',\'stageReception\',this.checked)">Reception</label>\n        </span>\n        <div style="flex:1;"><div><strong>${esc(i.name)}</strong> — ${esc(i.text)}${i.assignee?`<span class="chip">${esc(i.assignee)}</span>`:\'\'}${vwChipW(i)}${!i.stageDentist?\'<span class="chip" style="background:#fff4e0;color:#9a6b00;">needs dentist</span>\':\'\'}</div>\n        <div class="muted">${esc(i.context||\'\')}</div></div>\n        <input type="text" value="${esc(i.noteText||\'\')}" placeholder="note…" style="width:110px;" onchange="noteSave(\'${i.id}\',this.value)"><button onclick="delItem(\'${i.id}\')" title="Delete completely" style="background:#f2f2f5;color:#6e6e73;border:none;border-radius:9px;padding:6px 11px;cursor:pointer;">✕</button></div>`;\n      }\n      return `<div class="row" style="${ov?\'background:#fdf5f5;border-left:3px solid #c0392b;border-radius:10px;\':\'\'}"><input type="checkbox" onchange="tick(\'${i.id}\')">\n      <div style="flex:1;"><div><strong>${esc(i.name)}</strong>${i.text?\' — \'+esc(i.text):\'\'}${i.assignee?`<span class="chip">${esc(i.assignee)}</span>`:\'\'}${vwChipW(i)}${i.repeat?\'<span class="chip">↻</span>\':\'\'}</div>\n      <div class="muted">${esc(i.context||\'\')}${i.context?\' · \':\'\'}${i.due?`<span class="${od?\'over\':\'\'}">due ${i.due===today?\'today\':i.due}${od?\' — overdue\':\'\'}</span>`:\'waiting \'+age(i.createdAt)}</div></div>\n      <input type="text" id="n-${i.id}" value="${esc(i.noteText||\'\')}" placeholder="note…" style="width:120px;" onchange="noteSave(\'${i.id}\',this.value)"><button onclick="delItem(\'${i.id}\')" title="Delete completely" style="background:#f2f2f5;color:#6e6e73;border:none;border-radius:9px;padding:6px 11px;cursor:pointer;">✕</button></div>`;};\n    const pref=[\'Urgent\',\'CDBS\',\'Confirm appts\',\'Reception attention\',\'Unpaid invoices\',\'General\',\'Routine\',\'Checkouts\',\'Rebook\',\'Recalls\',\'Complete notes\',\'Huddle tags\'];const found=[...new Set([...open,...sched].map(i=>i.section||\'CDBS\'))];const secs=[...pref.filter(s=>found.includes(s)),...found.filter(s=>!pref.includes(s))];\n    const upRows=sched.map(i=>{const d=new Date(i.due+\'T00:00\');const w=d.toLocaleDateString(\'en-AU\',{weekday:\'short\',day:\'2-digit\',month:\'2-digit\'});const c2={\'Urgent\':\'#ff3b30\',\'CDBS\':\'#2F6B4F\',\'Confirm appts\':\'#e2a93b\',\'Checkouts\':\'#3478f6\',\'Reception attention\':\'#af52de\',\'Rebook\':\'#30b0c7\',\'Unpaid invoices\':\'#bf5af2\',\'Routine\':\'#5e5ce6\',\'General\':\'#8e8e93\',\'Recalls\':\'#ff9f0a\',\'Complete notes\':\'#7a5af5\',\'Huddle tags\':\'#0d9488\'}[i.section||\'General\']||\'#8e8e93\';return `<div class="row"><input type="checkbox" onchange="tick(\'${i.id}\')" title="Tick early - the schedule stays anchored"><span class="muted" style="min-width:82px;">${w}</span><div style="flex:1;"><strong>${esc(i.name)}</strong> <span class="chip" style="background:${c2}1c;color:${c2};">${esc(i.section||\'General\')}</span>${i.repeat?`<span class="chip">↻ ${esc(i.repeat)}</span>`:\'\'}</div><button onclick="delItem(\'${i.id}\')" style="background:#f2f2f5;color:#6e6e73;border:none;border-radius:9px;padding:6px 11px;cursor:pointer;">✕</button></div>`;}).join(\'\');const upcomingHtml=sched.length?`<details class="dept"><summary style="font-size:17px;font-weight:700;letter-spacing:-.2px;padding:12px 0;"><span class="ci" style="display:inline-block;width:18px;color:#8e8e93;font-weight:600;"></span>Upcoming <span class="chip" style="background:#f2f2f5;color:#6e6e73;">${sched.length}</span></summary>${upRows}</details>`:\'\';document.getElementById(\'open\').innerHTML=open.length?secs.map(s=>{\n      const its=open.filter(i=>(i.section||\'CDBS\')===s); if(!its.length)return \'\';\n      const col={\'Urgent\':\'#ff3b30\',\'CDBS\':\'#2F6B4F\',\'Confirm appts\':\'#e2a93b\',\'Checkouts\':\'#3478f6\',\'Reception attention\':\'#af52de\',\'Rebook\':\'#30b0c7\',\'Unpaid invoices\':\'#bf5af2\',\'General\':\'#8e8e93\',\'Recalls\':\'#ff9f0a\',\'Complete notes\':\'#7a5af5\',\'Huddle tags\':\'#0d9488\'}[s]||\'#8e8e93\';\n      const nd=its.filter(i=>(i.kind===\'checkout\'||i.kind===\'rebook\'||i.kind===\'recall\')&&!i.stageDentist).length;const sits=sched.filter(i=>(i.section||\'CDBS\')===s);const srows=sits.length?(\'<div class="schwrap" style="display:none;">\'+sits.map(i=>{const d=new Date(i.due+\'T00:00\');const w=d.toLocaleDateString(\'en-AU\',{weekday:\'short\',day:\'2-digit\',month:\'2-digit\'});return `<div class="row" style="opacity:.55;"><span class="muted" style="min-width:80px;">${w}</span><div style="flex:1;"><strong>${esc(i.name)}</strong>${i.repeat?`<span class="chip">↻ ${esc(i.repeat)}</span>`:\'\'}</div></div>`;}).join(\'\')+\'</div>\'):\'\';const ovn=its.filter(i=>i.kind===\'unpaid\'&&i.escalated).length;\n      return `<details class="dept" ${s===\'Urgent\'?\'open\':\'\'}><summary style="font-size:17px;font-weight:700;letter-spacing:-.2px;padding:12px 0;"><span class="ci" style="display:inline-block;width:18px;color:#8e8e93;font-weight:600;"></span>${s} <span class="chip" style="background:${its.length?\'#fdecec\':\'#e6f4ec\'};color:${its.length?\'#c0392b\':\'#1d7a46\'};">${its.length}</span>${nd?`<span class="chip" style="background:#fff4e0;color:#9a6b00;">${nd} need dentist</span>`:\'\'}${ovn?`<span class="chip" style="background:#fdecec;color:#c0392b;">${ovn} overdue 50d+</span>`:\'\'}${sits.length?`<span class="chip" style="background:#f2f2f5;color:#6e6e73;cursor:pointer;" onclick="event.preventDefault();event.stopPropagation();const w=this.closest(\'details\').querySelector(\'.schwrap\');const on=w.style.display===\'none\';w.style.display=on?\'block\':\'none\';this.textContent=\'${sits.length} scheduled \'+(on?\'▾\':\'▸\');">${sits.length} scheduled ▸</span>`:\'\'}</summary>${its.map(row).join(\'\')}${srows}${(function(){if(s!==\'Unpaid invoices\')return \'\';const pk=parked.filter(p=>(p.section||\'CDBS\')===s);if(!pk.length)return \'\';const dys=p=>p.parkedAt?Math.floor((Date.now()-Date.parse(p.parkedAt))/86400000):0;const hot=pk.some(p=>dys(p)>=30);return `<details style="margin-top:6px;"><summary class="muted" style="cursor:pointer;${hot?\'color:#c0392b;font-weight:700;\':\'\'}">Pending claims (${pk.length})${hot?\' — some 30+ days\':\'\'}</summary>`+pk.sort((a,b)=>String(a.parkedAt||\'\').localeCompare(String(b.parkedAt||\'\'))).map(p=>{const d=dys(p);return `<div class="row"><div style="flex:1;"><strong>${esc(p.name)}</strong> <span class="chip" style="background:${d>=30?\'#fdecec\':\'#f2f2f5\'};color:${d>=30?\'#c0392b\':\'#6e6e73\'};">${esc(p.parked)} since ${new Date(p.parkedAt).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'})}${d>=30?\' — \'+d+\' days\':\'\'}</span></div></div>`;}).join(\'\')+`</details>`;})()}</details>`;\n    }).join(\'\')+upcomingHtml:(upcomingHtml||\'<div class="muted">Nothing waiting — all sorted ✓</div>\');\n    document.getElementById(\'dc\').textContent=done.length;\n    document.getElementById(\'done\').innerHTML=done.map(i=>\n      `<div class="muted" style="padding:6px 0;"><s>${esc(i.name)}</s> ${i.doneNote?\'· "\'+esc(i.doneNote)+\'"\':\'\'}\n       <a href="#" onclick="untick(\'${i.id}\');return false;" style="float:right;font-size:11px;">undo</a></div>`).join(\'\')||\'<div class="muted">None yet.</div>\';\n}\nfirebase.auth().onAuthStateChanged(u=>{\n  if(!u){signedInUI(false);document.getElementById(\'st\').className=\'pill warn\';document.getElementById(\'st\').textContent=\'sign in\';return;}\n  const okDomain=(u.email||\'\').toLowerCase().endsWith(\'@sdtoowoomba.com.au\');\n  if(!okDomain){document.getElementById(\'gateMsg\').textContent=\'That account is not a clinic account (\'+(u.email||\'\')+\'). Sign in with your @sdtoowoomba.com.au Google account.\';firebase.auth().signOut();signedInUI(false);return;}\n  signedInUI(true);startData();\n});\nfunction vwEff(i){var m=String(i.viewsTag||\'\').trim();if(m===\'*\')return[];var kn=window._vKnown||{};if(m){return m.split(\',\').map(function(s){return s.trim();}).filter(function(s){return kn[s];});}return ((window._vcfg&&window._vcfg.rules[i.section||\'CDBS\'])||[]).filter(function(s){return kn[s];});}\nfunction vwPass(i){var v=window._vsel||\'\';if(!v)return true;var n=v.slice(2),t=vwEff(i);if(v.indexOf(\'a:\')===0)return (i.assignee||\'\')===n||t.indexOf(n)>=0;return t.length===0||t.indexOf(n)>=0||(i.assignee||\'\')===n;}\nfunction vwLabel(i){var t=vwEff(i);if(!t.length)return \'Everyone\';return esc(t[0])+(t.length>1?\' +\'+(t.length-1):\'\');}\nfunction vwChipW(i){var man=String(i.viewsTag||\'\').trim();return \'<span class="chip" style="cursor:pointer;\'+(man?\'border:1px solid #b6b6bb;\':\'\')+\'" onclick="vwEdit(\\\'\'+i.id+\'\\\')" title="Who sees this item — tap to change">👁 \'+vwLabel(i)+\'</span>\';}\nfunction vwSel(v){window._vsel=v;try{localStorage.setItem(\'sdtView\',v);}catch(e){}if(window._snapLast)paintSnap(window._snapLast);}\nfunction vwFill(items){var sel=document.getElementById(\'vw\');if(!sel)return;var vs=(window._vcfg&&window._vcfg.views)||[];var names=[];items.forEach(function(i){if(i.assignee&&names.indexOf(i.assignee)<0)names.push(i.assignee);});names.sort();var kn={};vs.forEach(function(v){kn[v]=1;});names.forEach(function(n){kn[n]=1;});window._vKnown=kn;if(window._vsel===undefined){try{window._vsel=localStorage.getItem(\'sdtView\')||\'\';}catch(e){window._vsel=\'\';}}var h=\'<option value="">View: Everyone</option>\';vs.forEach(function(v){h+=\'<option value="v:\'+esc(v)+\'">\'+esc(v)+\'</option>\';});names.forEach(function(n){h+=\'<option value="a:\'+esc(n)+\'">\'+esc(n)+\'</option>\';});sel.innerHTML=h;sel.value=window._vsel||\'\';if(sel.value!==(window._vsel||\'\')){window._vsel=\'\';sel.value=\'\';}}\nfunction vwEdit(id){var i=(window._all||[]).find(function(x){return x.id===id;});if(!i)return;var vs=((window._vcfg&&window._vcfg.views)||[]).slice();(window._all||[]).forEach(function(x){if(x.assignee&&vs.indexOf(x.assignee)<0)vs.push(x.assignee);});var cur=String(i.viewsTag||\'\').trim();var man=cur&&cur!==\'*\'?cur.split(\',\').map(function(s){return s.trim();}):[];var sel=cur?man:((window._vcfg&&window._vcfg.rules[i.section||\'CDBS\'])||[]);var old=document.getElementById(\'vwOv\');if(old)old.remove();var od=document.createElement(\'div\');od.id=\'vwOv\';od.style.cssText=\'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99;display:flex;align-items:center;justify-content:center;\';var h=\'<div style="background:#fff;border-radius:16px;padding:16px;max-width:330px;width:92%;max-height:72%;overflow:auto;"><div style="font-weight:700;margin-bottom:4px;">Who sees this item</div><div class="muted" style="font-size:12px;margin-bottom:8px;">\'+esc(i.name)+(cur?\'\':\' — following the section rule\')+\'</div>\';vs.forEach(function(o){h+=\'<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:14px;"><input type="checkbox" data-vwo="\'+esc(o)+\'" \'+(sel.indexOf(o)>=0?\'checked\':\'\')+\' style="width:18px;height:18px;"> \'+esc(o)+\'</label>\';});if(!vs.length)h+=\'<div class="muted">No views yet — add them in the desk app (Advanced tools → Views).</div>\';h+=\'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button onclick="vwSave(\\\'\'+id+\'\\\',0)">Save</button><button onclick="vwSave(\\\'\'+id+\'\\\',1)" style="background:#f2f2f5;color:#3c3c43;">Use section rule</button><button onclick="document.getElementById(\\\'vwOv\\\').remove()" style="background:#f2f2f5;color:#3c3c43;">Cancel</button></div><div class="muted" style="margin-top:8px;font-size:11.5px;">No boxes ticked = Everyone. The assigned dentist always sees their items.</div></div>\';od.innerHTML=h;od.addEventListener(\'click\',function(e){if(e.target===od)od.remove();});document.body.appendChild(od);}\nfunction vwSave(id,useRule){var od=document.getElementById(\'vwOv\');if(!od)return;if(useRule){db.collection(\'cdbsActions\').doc(id).update({viewsTag:firebase.firestore.FieldValue.delete(),updatedAt:new Date().toISOString()});}else{var picked=[];od.querySelectorAll(\'input[data-vwo]\').forEach(function(c){if(c.checked)picked.push(c.getAttribute(\'data-vwo\'));});db.collection(\'cdbsActions\').doc(id).update({viewsTag:picked.length?picked.join(\',\'):\'*\',updatedAt:new Date().toISOString()});}od.remove();}\nfunction tick(id){const cb=event&&event.target;if(cb){cb.disabled=true;const r=cb.closest(\'.row\');if(r)r.style.opacity=\'.45\';}\nconst n=document.getElementById(\'n-\'+id);\n  db.collection(\'cdbsActions\').doc(id).get().then(d=>{const it=d.data()||{};\n    db.collection(\'cdbsActions\').doc(id).update({doneAt:new Date().toISOString(),doneNote:(n&&n.value||\'\').slice(0,200),updatedAt:new Date().toISOString()});\n    if(it.repeat){const nd=new Date((it.due||new Date().toISOString().slice(0,10))+\'T00:00:00\');\n      if(it.repeat===\'daily\')nd.setDate(nd.getDate()+1);else if(it.repeat===\'weekly\')nd.setDate(nd.getDate()+7);\n      else if(it.repeat===\'fortnightly\')nd.setDate(nd.getDate()+14);else if(it.repeat===\'sixmonthly\')nd.setMonth(nd.getMonth()+6);else if(it.repeat===\'yearly\')nd.setFullYear(nd.getFullYear()+1);else nd.setMonth(nd.getMonth()+1);\n      const id2=\'a\'+Date.now()+Math.random().toString(36).slice(2,6);\n      const clone={...it};delete clone.doneAt;delete clone.doneNote;\n      db.collection(\'cdbsActions\').doc(id2).set({...clone,createdAt:new Date().toISOString(),due:nd.toISOString().slice(0,10),updatedAt:new Date().toISOString()});\n    }});}\nfunction stage(id,field,on){\n  const u={updatedAt:new Date().toISOString()};\n  u[field]=on?new Date().toISOString():firebase.firestore.FieldValue.delete();\n  db.collection(\'cdbsActions\').doc(id).get().then(d=>{const it=d.data()||{};\n    const dOn=field===\'stageDentist\'?on:!!it.stageDentist;\n    const rOn=field===\'stageReception\'?on:!!it.stageReception;\n    if(dOn&&rOn){u.doneAt=new Date().toISOString();u.doneNote=it.noteText||\'\';}\n    else{u.doneAt=firebase.firestore.FieldValue.delete();}\n    db.collection(\'cdbsActions\').doc(id).update(u);});\n}\nfunction delItem(id){if(!confirm(\'Delete this item completely?\'))return;db.collection(\'cdbsActions\').doc(id).update({deleted:\'1\',updatedAt:new Date().toISOString()});}\nfunction noteSave(id,v){db.collection(\'cdbsActions\').doc(id).update({noteText:String(v||\'\').slice(0,200),updatedAt:new Date().toISOString()});}\nfunction untick(id){db.collection(\'cdbsActions\').doc(id).update({doneAt:firebase.firestore.FieldValue.delete(),doneNote:firebase.firestore.FieldValue.delete(),updatedAt:new Date().toISOString()});}\n\n\nfunction setTab(t){window._tab=t;document.getElementById(\'tabList\').style.background=t===\'list\'?\'#2F6B4F\':\'#f2f2f5\';document.getElementById(\'tabList\').style.color=t===\'list\'?\'#fff\':\'#3c3c43\';document.getElementById(\'tabReact\').style.background=t===\'react\'?\'#2F6B4F\':\'#f2f2f5\';document.getElementById(\'tabReact\').style.color=t===\'react\'?\'#fff\':\'#3c3c43\';if(window._all)renderSnapshotAgain();}\nfunction renderSnapshotAgain(){var ev=window._all||[];if(window._tab===\'react\'){document.getElementById(\'open\').style.display=\'none\';var dcp=document.getElementById(\'dc\');if(dcp)dcp.parentElement.style.display=\'none\';renderReactPage(ev);}else{document.getElementById(\'reactPage\').style.display=\'none\';document.getElementById(\'open\').style.display=\'\';var dcp2=document.getElementById(\'dc\');if(dcp2)dcp2.parentElement.style.display=\'\';}}\nfunction rOut(id,oc,extra){var upd={outcome:oc,updatedAt:new Date().toISOString()};if(oc===\'booked\'||oc===\'texted\'||oc===\'offlist\'){upd.doneAt=new Date().toISOString();}if(oc===\'offlist-pending\'){}if(oc===\'__clear\'){upd={outcome:firebase.firestore.FieldValue.delete(),updatedAt:new Date().toISOString()};}if(oc===\'followup\'){if(!extra){alert(\'Pick the follow-up date first.\');return;}upd.due=extra;}db.collection(\'cdbsActions\').doc(id).update(upd);}\nfunction rNote(id,val){if(!val.trim())return;var it=(window._all||[]).find(function(x){return x.id===id;});var log=[];try{log=JSON.parse((it&&it.notesLog)||\'[]\');}catch(e){log=[];}if(!log.length&&it&&it.noteText)log.push({t:it.noteText,d:it.updatedAt||it.createdAt,dest:\'local\'});log.push({t:val.trim().slice(0,300),d:new Date().toISOString(),dest:\'local\'});db.collection(\'cdbsActions\').doc(id).update({notesLog:JSON.stringify(log),noteText:\'\',updatedAt:new Date().toISOString()});}\nfunction rCard(i,tod){var done=!!i.doneAt;var lab={offlist:\'off list — inactivated ✓\',texted:\'no answer — texted\',booked:\'booked in\'};var bal=\'\';if(i.kind===\'reactcdbs\'){if(i.balanceIssue){var wI=i.balanceChecked?new Date(i.balanceChecked).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'}):\'\';bal=\'<span class="chip" style="background:#fff4e0;color:#9a6b00;font-weight:700;">\'+esc(i.balanceIssue)+\' · \'+wI+\'</span>\';}else if(i.balanceText){var w2=i.balanceChecked?new Date(i.balanceChecked).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'}):\'\';if(/not eligible/i.test(i.balanceText)){bal=\'<span class="chip" style="background:#fdecec;color:#c0392b;font-weight:700;">Not eligible · \'+w2+\'</span>\';}else{var m2=String(i.balanceText).match(/\\$\\s?([\\d,]+(?:\\.\\d+)?)/);if(m2&&Number(m2[1].replace(/,/g,\'\'))<100){bal=\'<span class="chip" style="background:#fdecec;color:#c0392b;font-weight:700;">$\'+m2[1]+\' left · \'+w2+\'</span>\';}else{bal=m2?\'<span class="chip" style="background:#e6f4ec;color:#1d7a46;font-weight:700;">$\'+m2[1]+\' available · \'+w2+\'</span>\':\'<span class="chip">checked \'+w2+\'</span>\';}}}else{bal=\'<span class="chip" style="background:#f2f2f5;color:#6e6e73;">balance not checked</span>\';}}\nvar st=\'\';if(done){st=\'<span class="chip" style="background:#e6f4ec;color:#1d7a46;">\'+(lab[i.outcome]||\'done\')+\'</span>\';}else if(i.due&&i.due>tod){st=\'<span class="chip" style="background:#eef2ff;color:#5e5ce6;">follow-up \'+i.due.slice(8,10)+\'/\'+i.due.slice(5,7)+\'</span>\';}\nvar log=[];try{log=JSON.parse(i.notesLog||\'[]\');}catch(e){}if(!log.length&&i.noteText)log=[{t:i.noteText,d:i.updatedAt||i.createdAt,dest:\'local\'}];\nvar logH=log.map(function(n){var w=new Date(n.d).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'});return n.dest===\'principle\'?\'<div style="background:#e6f4ec;color:#1d7a46;border-radius:8px;padding:5px 10px;font-size:12px;margin-top:4px;">✓ \'+w+\' sent to Principle: \'+esc(n.t)+\'</div>\':\'<div style="background:#f2f2f5;color:#3c3c43;border-radius:8px;padding:5px 10px;font-size:12px;margin-top:4px;">\'+w+\' saved: \'+esc(n.t)+\'</div>\';}).join(\'\');\nvar pend=!done&&i.outcome===\'offlist-pending\';\nvar pills=pend?(\'<div class="row" style="margin-top:7px;background:#fff4e0;border-radius:9px;padding:8px 10px;"><span style="color:#9a6b00;font-size:12px;font-weight:600;">⚠ Make them inactive in Principle, then:</span> \'+(i.plink?\'<a href="https://app.principle.dental\'+esc(i.plink)+\'" target="_blank" style="font-size:12px;">open file ↗</a> \':\'\')+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'offlist\\\')" style="border:none;border-radius:99px;padding:4px 11px;background:#1d7a4622;color:#1d7a46;font-weight:600;cursor:pointer;font-size:12px;">Done — made inactive</button><button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'__clear\\\')" style="border:none;border-radius:99px;padding:4px 11px;background:#f2f2f5;color:#6e6e73;cursor:pointer;font-size:12px;">Cancel</button></div>\')\n:(\'<div class="row" style="margin-top:7px;flex-wrap:wrap;gap:5px;">\'\n+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'booked\\\')" style="border:none;border-radius:99px;padding:5px 11px;background:\'+(i.outcome===\'booked\'?\'#1d7a4622\':\'#f2f2f5\')+\';color:\'+(i.outcome===\'booked\'?\'#1d7a46\':\'#6e6e73\')+\';font-weight:600;cursor:pointer;font-size:12px;">Booked in</button>\'\n+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'texted\\\')" style="border:none;border-radius:99px;padding:5px 11px;background:\'+(i.outcome===\'texted\'?\'#9a6b0022\':\'#f2f2f5\')+\';color:\'+(i.outcome===\'texted\'?\'#9a6b00\':\'#6e6e73\')+\';font-weight:600;cursor:pointer;font-size:12px;">No answer — text pt</button>\'\n+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'offlist-pending\\\')" style="border:none;border-radius:99px;padding:5px 11px;background:#f2f2f5;color:#6e6e73;font-weight:600;cursor:pointer;font-size:12px;">Take off list</button>\'\n+\'<button onclick="var d=this.nextElementSibling.value;rOut(\\\'\'+i.id+\'\\\',\\\'followup\\\',d)" style="border:none;border-radius:99px;padding:5px 11px;background:\'+(i.outcome===\'followup\'?\'#5e5ce622\':\'#f2f2f5\')+\';color:\'+(i.outcome===\'followup\'?\'#5e5ce6\':\'#6e6e73\')+\';font-weight:600;cursor:pointer;font-size:12px;">Follow-up ▸</button><input type="date" value="\'+(i.outcome===\'followup\'&&i.due?i.due:\'\')+\'" style="font:inherit;border:1px solid #d2d2d7;border-radius:7px;padding:3px;font-size:12px;">\'\n+\'</div>\');\nreturn \'<div style="padding:11px 0;border-bottom:1px solid #f0f0f3;"><div><strong>\'+esc(i.name)+\'</strong> \'+(i.mobile?\'<a href="tel:\'+esc(i.mobile).replace(/\\s+/g,\'\')+\'" style="color:#2F6B4F;font-weight:600;text-decoration:none;">\'+esc(i.mobile)+\'</a>\':\'\')+\' \'+(i.feeSched?\'<span class="chip">\'+esc(i.feeSched)+\'</span>\':\'\')+(i.lastVisit?\'<span class="chip">seen \'+esc(i.lastVisit)+\'</span>\':\'\')+(i.dob?\'<span class="chip">DOB \'+esc(i.dob)+\'</span>\':\'\')+\' \'+bal+\' \'+st+\'</div>\'+pills+logH\n+\'<div class="row" style="margin-top:6px;"><input type="text" placeholder="new note…" style="flex:1;min-width:170px;font:inherit;font-size:12px;border:1px solid #d2d2d7;border-radius:8px;padding:5px 9px;"><button onclick="rNote(\\\'\'+i.id+\'\\\',this.previousElementSibling.value);this.previousElementSibling.value=\\\'\\\'" style="border:none;border-radius:99px;padding:5px 12px;background:#f2f2f5;color:#3c3c43;cursor:pointer;font-size:12px;">Save here</button><button disabled title="Send from the clinic app — this page cannot drive Principle" style="border:none;border-radius:99px;padding:5px 12px;background:#f7f7f9;color:#b6b6bb;font-size:12px;">→ Principle & pin</button></div></div>\';}\nfunction renderReactPage(items){window._tab=\'react\';document.getElementById(\'open\').style.display=\'none\';var dcp=document.getElementById(\'dc\');if(dcp)dcp.parentElement.style.display=\'none\';var box=document.getElementById(\'reactPage\');box.style.display=\'block\';var tod=(function(){var d=new Date();return d.getFullYear()+\'-\'+String(d.getMonth()+1).padStart(2,\'0\')+\'-\'+String(d.getDate()).padStart(2,\'0\');})();\nvar q=(document.getElementById(\'rq\').value||\'\').trim().toLowerCase();var kinds=[[\'reactivation\',\'Reactivation Health funds/DVA\'],[\'reactcdbs\',\'Reactivation CDBS — under 18\']];var h=\'\';\nkinds.forEach(function(kk){var kind=kk[0],title=kk[1];var all=items.filter(function(i){return i.kind===kind;});var show;\nif(q){show=all.filter(function(i){return (i.name||\'\').toLowerCase().indexOf(q)>=0;});}\nelse{show=all.filter(function(i){return !i.doneAt&&!(i.due&&i.due>tod);});}\nvar notE=[];if(kind===\'reactcdbs\'&&!q){var prk=function(i){var t=i.balanceText||\'\';if(/not eligible/i.test(t))return true;var m=String(t).match(/\\$\\s?([\\d,]+(?:\\.\\d+)?)/);return !!(m&&Number(m[1].replace(/,/g,\'\'))<100);};notE=show.filter(prk);show=show.filter(function(i){return !prk(i);});}\nshow.sort(function(a,b){return String(a.name).localeCompare(String(b.name));});\nvar doneN=all.filter(function(i){return i.doneAt&&(Date.now()-Date.parse(i.doneAt))<180*86400000;});\ndoneN.sort(function(a,b){return String(b.doneAt).localeCompare(String(a.doneAt));});\nh+=\'<details class="dept" open><summary style="font-size:17px;font-weight:700;padding:12px 0;">\'+title+\' <span class="chip" style="background:\'+(show.length?\'#fdecec\':\'#e6f4ec\')+\';color:\'+(show.length?\'#c0392b\':\'#1d7a46\')+\';">\'+show.length+\'</span></summary>\'+(show.map(function(i){return rCard(i,tod);}).join(\'\')||\'<div class="muted">\'+(q?\'No match here.\':\'Nobody waiting — all clear.\')+\'</div>\')+(notE.length?\'<details style="margin-top:8px;"><summary class="muted" style="cursor:pointer;">Not eligible / under $100 (\'+notE.length+\') — parked; new CDBS years refill these</summary>\'+notE.map(function(i){return rCard(i,tod);}).join(\'\')+\'</details>\':\'\')+(!q&&doneN.length?\'<details style="margin-top:8px;"><summary class="muted" style="cursor:pointer;">Done (\'+doneN.length+\') — shown 180 days</summary>\'+doneN.map(function(i){return rCard(i,tod);}).join(\'\')+\'</details>\':\'\')+\'</details>\';});\nbox.innerHTML=h;}\n\n</script></body></html>';
+const NURSE_PAGE_HTML = '<!DOCTYPE html>\n<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n<title>SDT Reception — Action List</title>\n<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>\n<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>\n<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>\n<style>\nbody{font-family:-apple-system,\'Segoe UI\',system-ui,sans-serif;background:#f5f5f7;color:#1d1d1f;margin:0;padding:20px;max-width:680px;margin:0 auto;}\nh1{font-size:24px;letter-spacing:-.4px;} .card{background:#fff;border-radius:16px;padding:18px;margin-top:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);}\n.row{display:flex;gap:8px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f0f0f3;flex-wrap:wrap;}\n.muted{color:#6e6e73;font-size:13px;} input[type=checkbox]{width:20px;height:20px;margin-top:2px;}\ninput[type=text],input[type=date],select{font:inherit;border:1px solid #d2d2d7;border-radius:10px;padding:7px 10px;font-size:13px;}\nbutton{font:inherit;border:none;border-radius:99px;padding:8px 16px;font-weight:600;cursor:pointer;background:#2F6B4F;color:#fff;}\n.pill{display:inline-block;border-radius:99px;padding:5px 12px;font-size:12px;font-weight:600;}\n.good{background:#e6f4ec;color:#1d7a46;} .warn{background:#fff4e0;color:#9a6b00;} .bad{background:#fdecec;color:#c0392b;}\n.chip{display:inline-block;background:#ececf0;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:600;margin-left:6px;}\n.over{color:#c0392b;font-weight:600;} s{color:#a0a0a5;} details{margin-top:8px;} summary{cursor:pointer;font-weight:650;padding:6px 0;list-style:none;}\ndetails.dept>summary .ci::before{content:\'+\';}details.dept[open]>summary .ci::before{content:\'\\2212\';}.row{padding:11px 0;}</style></head><body>\n<h1>SDT Lists <span id="st" class="pill warn">connecting…</span></h1>\n<div id="tabs" style="display:none; gap:8px; margin:10px 0;">\n  <button onclick="setTab(\'list\')" id="tabList" style="border:none; border-radius:99px; padding:7px 16px; font-weight:700; cursor:pointer; background:#2F6B4F; color:#fff;">Action list</button>\n  <button onclick="setTab(\'react\')" id="tabReact" style="border:none; border-radius:99px; padding:7px 16px; font-weight:700; cursor:pointer; background:#f2f2f5; color:#3c3c43;">Reactivation calls</button>\n  <select id="vw" onchange="vwSel(this.value)" style="font:inherit;border:1px solid #d2d2d7;border-radius:9px;padding:6px 8px;max-width:170px;"></select>\n  <input type="text" id="rq" placeholder="search patients…" oninput="window._tab===\'react\'&&renderReactPage(window._all)" style="margin-left:auto; font:inherit; border:1px solid #d2d2d7; border-radius:9px; padding:6px 10px; width:210px;">\n</div>\n<div id="reactPage" style="display:none;"></div>\n<div id="gate" style="display:block; text-align:center; margin-top:40px;">\n  <div class="card" style="display:block;">\n    <div style="font-weight:700; font-size:17px;">Staff sign-in</div>\n    <div class="muted" id="gateMsg" style="margin:8px 0 14px;">Sign in with your clinic Google account to open the Action List.</div>\n    <button onclick="doSignIn()" style="font-size:14px;">Sign in with Google</button>\n  </div>\n</div>\n<div class="card" id="mainCard" style="display:none;">\n  \n  <div id="open" class="muted" style="margin-top:10px;">Loading…</div>\n  <details><summary class="muted">Done this fortnight (<span id="dc">0</span>)</summary><div id="done"></div></details>\n</div>\n<script>\nfirebase.initializeApp({apiKey:"AIzaSyBFrr_cvA4j2RA_Ern6z6AJk-pahPv2qHU",authDomain:"inv-c20f7.firebaseapp.com",projectId:"inv-c20f7"});\nconst db=firebase.firestore(); const esc=s=>String(s||\'\').replace(/[&<>"]/g,c=>({\'&\':\'&amp;\',\'<\':\'&lt;\',\'>\':\'&gt;\',\'"\':\'&quot;\'}[c]));\nconst age=iso=>{const d=Math.floor((Date.now()-Date.parse(iso))/86400000);return d<=0?\'today\':d===1?\'yesterday\':d+\' days\';};\nconst signedInUI=ok=>{document.getElementById(\'gate\').style.display=ok?\'none\':\'block\';document.getElementById(\'mainCard\').style.display=ok?\'block\':\'none\';};\nfunction doSignIn(){firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>{document.getElementById(\'st\').className=\'pill bad\';document.getElementById(\'st\').textContent=\'sign-in failed\';});}\nvar _rt=null,_pend=null;\nfunction paintSoon(fn){_pend=fn;if(_rt)return;_rt=setTimeout(function(){_rt=null;var f=_pend;_pend=null;if(document.hidden){_pend=f;return;}f();},220);}\ndocument.addEventListener(\'visibilitychange\',function(){if(!document.hidden&&_pend){var f=_pend;_pend=null;f();}});\nfunction startData(){\n  db.collection(\'cdbsActions\').onSnapshot(function(snap){window._snapLast=snap;paintSoon(function(){paintSnap(snap);});});\n}\nfunction paintSnap(snap){\n    document.getElementById(\'st\').className=\'pill good\'; document.getElementById(\'st\').textContent=\'live\';\n    let items=[]; snap.forEach(d=>items.push({id:d.id,...d.data()}));\n    const tod=(()=>{const d=new Date();return d.getFullYear()+\'-\'+String(d.getMonth()+1).padStart(2,\'0\')+\'-\'+String(d.getDate()).padStart(2,\'0\');})();window._sch=window._sch||{};items=items.filter(function(i){return !i.deleted;});var _vc=items.find(function(i){return i.id===\'_viewsConfig\';})||{};window._vcfg={views:[],rules:{}};try{window._vcfg.views=JSON.parse(_vc.viewsList||\'[]\');}catch(e){}try{window._vcfg.rules=JSON.parse(_vc.viewsRules||\'{}\');}catch(e){}items=items.filter(function(i){return i.id!==\'_viewsConfig\'&&i.kind!==\'viewscfg\';});vwFill(items);window._all=items.slice();document.getElementById(\'tabs\').style.display=\'flex\';if(window._tab===\'react\'){renderReactPage(items);return;}document.getElementById(\'reactPage\').style.display=\'none\';document.getElementById(\'open\').style.display=\'\';document.getElementById(\'dc\')&&(document.getElementById(\'dc\').parentElement.style.display=\'\');items=items.filter(i=>i.kind!==\'reactivation\'&&i.kind!==\'reactcdbs\');items=items.filter(vwPass);const sched=items.filter(i=>!i.doneAt&&i.due&&i.due>tod).sort((a,b)=>String(a.due).localeCompare(String(b.due)));const parked=items.filter(i=>!i.doneAt&&i.parked);const open=items.filter(i=>!i.doneAt&&!(i.due&&i.due>tod)&&!i.parked), done=items.filter(i=>i.doneAt&&(Date.now()-Date.parse(i.doneAt))<((i.kind===\'unpaid\'?60:14)*86400000));\n    const today=new Date().toISOString().slice(0,10);\n    const row=i=>{const od=i.due&&i.due<today;const ov=i.kind===\'unpaid\'&&i.escalated&&!i.doneAt;\n      if(i.kind===\'checkout\'||i.kind===\'rebook\'||i.kind===\'recall\'){\n        return `<div class="row" style="${(i.stageDentist||i.stageReception)?\'background:#fafdfb;border-radius:10px;\':\'\'}">\n        <span style="display:inline-flex;gap:6px;">\n          <label style="display:inline-flex;align-items:center;gap:4px;background:${i.stageDentist?\'#e6f4ec\':\'#f2f2f5\'};border-radius:99px;padding:4px 10px;font-size:12px;font-weight:600;color:${i.stageDentist?\'#1d7a46\':\'#6e6e73\'};"><input type="checkbox" ${i.stageDentist?\'checked\':\'\'} onchange="stage(\'${i.id}\',\'stageDentist\',this.checked)">Dentist</label>\n          <label style="display:inline-flex;align-items:center;gap:4px;background:${i.stageReception?\'#e6f4ec\':\'#f2f2f5\'};border-radius:99px;padding:4px 10px;font-size:12px;font-weight:600;color:${i.stageReception?\'#1d7a46\':\'#6e6e73\'};"><input type="checkbox" ${i.stageReception?\'checked\':\'\'} onchange="stage(\'${i.id}\',\'stageReception\',this.checked)">Reception</label>\n        </span>\n        <div style="flex:1;"><div><strong>${esc(i.name)}</strong> — ${esc(i.text)}${i.assignee?`<span class="chip">${esc(i.assignee)}</span>`:\'\'}${vwChipW(i)}${!i.stageDentist?\'<span class="chip" style="background:#fff4e0;color:#9a6b00;">needs dentist</span>\':\'\'}</div>\n        <div class="muted">${esc(i.context||\'\')}</div></div>\n        <input type="text" value="${esc(i.noteText||\'\')}" placeholder="note…" style="width:110px;" onchange="noteSave(\'${i.id}\',this.value)"><button onclick="delItem(\'${i.id}\')" title="Delete completely" style="background:#f2f2f5;color:#6e6e73;border:none;border-radius:9px;padding:6px 11px;cursor:pointer;">✕</button></div>`;\n      }\n      return `<div class="row" style="${ov?\'background:#fdf5f5;border-left:3px solid #c0392b;border-radius:10px;\':\'\'}"><input type="checkbox" onchange="tick(\'${i.id}\')">\n      <div style="flex:1;"><div><strong>${esc(i.name)}</strong>${i.text?\' — \'+esc(i.text):\'\'}${i.assignee?`<span class="chip">${esc(i.assignee)}</span>`:\'\'}${vwChipW(i)}${i.repeat?\'<span class="chip">↻</span>\':\'\'}</div>\n      <div class="muted">${esc(i.context||\'\')}${i.context?\' · \':\'\'}${i.due?`<span class="${od?\'over\':\'\'}">due ${i.due===today?\'today\':i.due}${od?\' — overdue\':\'\'}</span>`:\'waiting \'+age(i.createdAt)}</div></div>\n      <input type="text" id="n-${i.id}" value="${esc(i.noteText||\'\')}" placeholder="note…" style="width:120px;" onchange="noteSave(\'${i.id}\',this.value)"><button onclick="delItem(\'${i.id}\')" title="Delete completely" style="background:#f2f2f5;color:#6e6e73;border:none;border-radius:9px;padding:6px 11px;cursor:pointer;">✕</button></div>`;};\n    const pref=[\'Urgent\',\'CDBS\',\'Confirm appts\',\'Reception attention\',\'Unpaid invoices\',\'General\',\'Routine\',\'Checkouts\',\'Rebook\',\'Recalls\',\'Complete notes\',\'Huddle tags\'];const found=[...new Set([...open,...sched].map(i=>i.section||\'CDBS\'))];const secs=[...pref.filter(s=>found.includes(s)),...found.filter(s=>!pref.includes(s))];\n    const upRows=sched.map(i=>{const d=new Date(i.due+\'T00:00\');const w=d.toLocaleDateString(\'en-AU\',{weekday:\'short\',day:\'2-digit\',month:\'2-digit\'});const c2={\'Urgent\':\'#ff3b30\',\'CDBS\':\'#2F6B4F\',\'Confirm appts\':\'#e2a93b\',\'Checkouts\':\'#3478f6\',\'Reception attention\':\'#af52de\',\'Rebook\':\'#30b0c7\',\'Unpaid invoices\':\'#bf5af2\',\'Routine\':\'#5e5ce6\',\'General\':\'#8e8e93\',\'Recalls\':\'#ff9f0a\',\'Complete notes\':\'#7a5af5\',\'Huddle tags\':\'#0d9488\'}[i.section||\'General\']||\'#8e8e93\';return `<div class="row"><input type="checkbox" onchange="tick(\'${i.id}\')" title="Tick early - the schedule stays anchored"><span class="muted" style="min-width:82px;">${w}</span><div style="flex:1;"><strong>${esc(i.name)}</strong> <span class="chip" style="background:${c2}1c;color:${c2};">${esc(i.section||\'General\')}</span>${i.repeat?`<span class="chip">↻ ${esc(i.repeat)}</span>`:\'\'}</div><button onclick="delItem(\'${i.id}\')" style="background:#f2f2f5;color:#6e6e73;border:none;border-radius:9px;padding:6px 11px;cursor:pointer;">✕</button></div>`;}).join(\'\');const upcomingHtml=sched.length?`<details class="dept"><summary style="font-size:17px;font-weight:700;letter-spacing:-.2px;padding:12px 0;"><span class="ci" style="display:inline-block;width:18px;color:#8e8e93;font-weight:600;"></span>Upcoming <span class="chip" style="background:#f2f2f5;color:#6e6e73;">${sched.length}</span></summary>${upRows}</details>`:\'\';document.getElementById(\'open\').innerHTML=open.length?secs.map(s=>{\n      const its=open.filter(i=>(i.section||\'CDBS\')===s); if(!its.length)return \'\';\n      const col={\'Urgent\':\'#ff3b30\',\'CDBS\':\'#2F6B4F\',\'Confirm appts\':\'#e2a93b\',\'Checkouts\':\'#3478f6\',\'Reception attention\':\'#af52de\',\'Rebook\':\'#30b0c7\',\'Unpaid invoices\':\'#bf5af2\',\'General\':\'#8e8e93\',\'Recalls\':\'#ff9f0a\',\'Complete notes\':\'#7a5af5\',\'Huddle tags\':\'#0d9488\'}[s]||\'#8e8e93\';\n      const nd=its.filter(i=>(i.kind===\'checkout\'||i.kind===\'rebook\'||i.kind===\'recall\')&&!i.stageDentist).length;const sits=sched.filter(i=>(i.section||\'CDBS\')===s);const srows=sits.length?(\'<div class="schwrap" style="display:none;">\'+sits.map(i=>{const d=new Date(i.due+\'T00:00\');const w=d.toLocaleDateString(\'en-AU\',{weekday:\'short\',day:\'2-digit\',month:\'2-digit\'});return `<div class="row" style="opacity:.55;"><span class="muted" style="min-width:80px;">${w}</span><div style="flex:1;"><strong>${esc(i.name)}</strong>${i.repeat?`<span class="chip">↻ ${esc(i.repeat)}</span>`:\'\'}</div></div>`;}).join(\'\')+\'</div>\'):\'\';const ovn=its.filter(i=>i.kind===\'unpaid\'&&i.escalated).length;\n      return `<details class="dept" ${s===\'Urgent\'?\'open\':\'\'}><summary style="font-size:17px;font-weight:700;letter-spacing:-.2px;padding:12px 0;"><span class="ci" style="display:inline-block;width:18px;color:#8e8e93;font-weight:600;"></span>${s} <span class="chip" style="background:${its.length?\'#fdecec\':\'#e6f4ec\'};color:${its.length?\'#c0392b\':\'#1d7a46\'};">${its.length}</span>${nd?`<span class="chip" style="background:#fff4e0;color:#9a6b00;">${nd} need dentist</span>`:\'\'}${ovn?`<span class="chip" style="background:#fdecec;color:#c0392b;">${ovn} overdue 50d+</span>`:\'\'}${sits.length?`<span class="chip" style="background:#f2f2f5;color:#6e6e73;cursor:pointer;" onclick="event.preventDefault();event.stopPropagation();const w=this.closest(\'details\').querySelector(\'.schwrap\');const on=w.style.display===\'none\';w.style.display=on?\'block\':\'none\';this.textContent=\'${sits.length} scheduled \'+(on?\'▾\':\'▸\');">${sits.length} scheduled ▸</span>`:\'\'}</summary>${its.map(row).join(\'\')}${srows}${(function(){if(s!==\'Unpaid invoices\')return \'\';const pk=parked.filter(p=>(p.section||\'CDBS\')===s);if(!pk.length)return \'\';const dys=p=>p.parkedAt?Math.floor((Date.now()-Date.parse(p.parkedAt))/86400000):0;const hot=pk.some(p=>dys(p)>=30);return `<details style="margin-top:6px;"><summary class="muted" style="cursor:pointer;${hot?\'color:#c0392b;font-weight:700;\':\'\'}">Pending claims (${pk.length})${hot?\' — some 30+ days\':\'\'}</summary>`+pk.sort((a,b)=>String(a.parkedAt||\'\').localeCompare(String(b.parkedAt||\'\'))).map(p=>{const d=dys(p);return `<div class="row"><div style="flex:1;"><strong>${esc(p.name)}</strong> <span class="chip" style="background:${d>=30?\'#fdecec\':\'#f2f2f5\'};color:${d>=30?\'#c0392b\':\'#6e6e73\'};">${esc(p.parked)} since ${new Date(p.parkedAt).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'})}${d>=30?\' — \'+d+\' days\':\'\'}</span></div></div>`;}).join(\'\')+`</details>`;})()}</details>`;\n    }).join(\'\')+upcomingHtml:(upcomingHtml||\'<div class="muted">Nothing waiting — all sorted ✓</div>\');\n    document.getElementById(\'dc\').textContent=done.length;\n    document.getElementById(\'done\').innerHTML=done.map(i=>\n      `<div class="muted" style="padding:6px 0;"><s>${esc(i.name)}</s> ${i.doneNote?\'· "\'+esc(i.doneNote)+\'"\':\'\'}\n       <a href="#" onclick="untick(\'${i.id}\');return false;" style="float:right;font-size:11px;">undo</a></div>`).join(\'\')||\'<div class="muted">None yet.</div>\';\n}\nfirebase.auth().onAuthStateChanged(u=>{\n  if(!u){signedInUI(false);document.getElementById(\'st\').className=\'pill warn\';document.getElementById(\'st\').textContent=\'sign in\';return;}\n  const okDomain=(u.email||\'\').toLowerCase().endsWith(\'@sdtoowoomba.com.au\');\n  if(!okDomain){document.getElementById(\'gateMsg\').textContent=\'That account is not a clinic account (\'+(u.email||\'\')+\'). Sign in with your @sdtoowoomba.com.au Google account.\';firebase.auth().signOut();signedInUI(false);return;}\n  signedInUI(true);startData();\n});\nfunction vwEff(i){var m=String(i.viewsTag||\'\').trim();if(m===\'*\')return[];var kn=window._vKnown||{};if(m){return m.split(\',\').map(function(s){return s.trim();}).filter(function(s){return kn[s];});}return ((window._vcfg&&window._vcfg.rules[i.section||\'CDBS\'])||[]).filter(function(s){return kn[s];});}\nfunction vwPass(i){var v=window._vsel||\'\';if(!v)return true;var n=v.slice(2),t=vwEff(i);if(v.indexOf(\'a:\')===0)return (i.assignee||\'\')===n||t.indexOf(n)>=0;return t.length===0||t.indexOf(n)>=0||(i.assignee||\'\')===n;}\nfunction vwLabel(i){var t=vwEff(i);if(!t.length)return \'Everyone\';return esc(t[0])+(t.length>1?\' +\'+(t.length-1):\'\');}\nfunction vwChipW(i){var man=String(i.viewsTag||\'\').trim();return \'<span class="chip" style="cursor:pointer;\'+(man?\'border:1px solid #b6b6bb;\':\'\')+\'" onclick="vwEdit(\\\'\'+i.id+\'\\\')" title="Who sees this item — tap to change">👁 \'+vwLabel(i)+\'</span>\';}\nfunction vwSel(v){window._vsel=v;try{localStorage.setItem(\'sdtView\',v);}catch(e){}if(window._snapLast)paintSnap(window._snapLast);}\nfunction vwFill(items){var sel=document.getElementById(\'vw\');if(!sel)return;var vs=(window._vcfg&&window._vcfg.views)||[];var names=[];items.forEach(function(i){if(i.assignee&&names.indexOf(i.assignee)<0)names.push(i.assignee);});names.sort();var kn={};vs.forEach(function(v){kn[v]=1;});names.forEach(function(n){kn[n]=1;});window._vKnown=kn;if(window._vsel===undefined){try{window._vsel=localStorage.getItem(\'sdtView\')||\'\';}catch(e){window._vsel=\'\';}}var h=\'<option value="">View: Everyone</option>\';vs.forEach(function(v){h+=\'<option value="v:\'+esc(v)+\'">\'+esc(v)+\'</option>\';});names.forEach(function(n){h+=\'<option value="a:\'+esc(n)+\'">\'+esc(n)+\'</option>\';});sel.innerHTML=h;sel.value=window._vsel||\'\';if(sel.value!==(window._vsel||\'\')){window._vsel=\'\';sel.value=\'\';}}\nfunction vwEdit(id){var i=(window._all||[]).find(function(x){return x.id===id;});if(!i)return;var vs=((window._vcfg&&window._vcfg.views)||[]).slice();(window._all||[]).forEach(function(x){if(x.assignee&&vs.indexOf(x.assignee)<0)vs.push(x.assignee);});var cur=String(i.viewsTag||\'\').trim();var man=cur&&cur!==\'*\'?cur.split(\',\').map(function(s){return s.trim();}):[];var sel=cur?man:((window._vcfg&&window._vcfg.rules[i.section||\'CDBS\'])||[]);var old=document.getElementById(\'vwOv\');if(old)old.remove();var od=document.createElement(\'div\');od.id=\'vwOv\';od.style.cssText=\'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99;display:flex;align-items:center;justify-content:center;\';var h=\'<div style="background:#fff;border-radius:16px;padding:16px;max-width:330px;width:92%;max-height:72%;overflow:auto;"><div style="font-weight:700;margin-bottom:4px;">Who sees this item</div><div class="muted" style="font-size:12px;margin-bottom:8px;">\'+esc(i.name)+(cur?\'\':\' — following the section rule\')+\'</div>\';vs.forEach(function(o){h+=\'<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:14px;"><input type="checkbox" data-vwo="\'+esc(o)+\'" \'+(sel.indexOf(o)>=0?\'checked\':\'\')+\' style="width:18px;height:18px;"> \'+esc(o)+\'</label>\';});if(!vs.length)h+=\'<div class="muted">No views yet — add them in the desk app (Advanced tools → Views).</div>\';h+=\'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button onclick="vwSave(\\\'\'+id+\'\\\',0)">Save</button><button onclick="vwSave(\\\'\'+id+\'\\\',1)" style="background:#f2f2f5;color:#3c3c43;">Use section rule</button><button onclick="document.getElementById(\\\'vwOv\\\').remove()" style="background:#f2f2f5;color:#3c3c43;">Cancel</button></div><div class="muted" style="margin-top:8px;font-size:11.5px;">No boxes ticked = Everyone. The assigned dentist always sees their items.</div></div>\';od.innerHTML=h;od.addEventListener(\'click\',function(e){if(e.target===od)od.remove();});document.body.appendChild(od);}\nfunction vwSave(id,useRule){var od=document.getElementById(\'vwOv\');if(!od)return;if(useRule){db.collection(\'cdbsActions\').doc(id).update({viewsTag:firebase.firestore.FieldValue.delete(),updatedAt:new Date().toISOString()});}else{var picked=[];od.querySelectorAll(\'input[data-vwo]\').forEach(function(c){if(c.checked)picked.push(c.getAttribute(\'data-vwo\'));});db.collection(\'cdbsActions\').doc(id).update({viewsTag:picked.length?picked.join(\',\'):\'*\',updatedAt:new Date().toISOString()});}od.remove();}\nfunction tick(id){const cb=event&&event.target;if(cb){cb.disabled=true;const r=cb.closest(\'.row\');if(r)r.style.opacity=\'.45\';}\nconst n=document.getElementById(\'n-\'+id);\n  db.collection(\'cdbsActions\').doc(id).get().then(d=>{const it=d.data()||{};\n    db.collection(\'cdbsActions\').doc(id).update({doneAt:new Date().toISOString(),doneNote:(n&&n.value||\'\').slice(0,200),updatedAt:new Date().toISOString()});\n    if(it.repeat){const nd=new Date((it.due||new Date().toISOString().slice(0,10))+\'T00:00:00\');\n      if(it.repeat===\'daily\')nd.setDate(nd.getDate()+1);else if(it.repeat===\'weekly\')nd.setDate(nd.getDate()+7);\n      else if(it.repeat===\'fortnightly\')nd.setDate(nd.getDate()+14);else if(it.repeat===\'sixmonthly\')nd.setMonth(nd.getMonth()+6);else if(it.repeat===\'yearly\')nd.setFullYear(nd.getFullYear()+1);else nd.setMonth(nd.getMonth()+1);\n      const id2=\'a\'+Date.now()+Math.random().toString(36).slice(2,6);\n      const clone={...it};delete clone.doneAt;delete clone.doneNote;\n      db.collection(\'cdbsActions\').doc(id2).set({...clone,createdAt:new Date().toISOString(),due:nd.toISOString().slice(0,10),updatedAt:new Date().toISOString()});\n    }});}\nfunction stage(id,field,on){\n  const u={updatedAt:new Date().toISOString()};\n  u[field]=on?new Date().toISOString():firebase.firestore.FieldValue.delete();\n  db.collection(\'cdbsActions\').doc(id).get().then(d=>{const it=d.data()||{};\n    const dOn=field===\'stageDentist\'?on:!!it.stageDentist;\n    const rOn=field===\'stageReception\'?on:!!it.stageReception;\n    if(dOn&&rOn){u.doneAt=new Date().toISOString();u.doneNote=it.noteText||\'\';}\n    else{u.doneAt=firebase.firestore.FieldValue.delete();}\n    db.collection(\'cdbsActions\').doc(id).update(u);});\n}\nfunction delItem(id){if(!confirm(\'Delete this item completely?\'))return;db.collection(\'cdbsActions\').doc(id).update({deleted:\'1\',updatedAt:new Date().toISOString()});}\nfunction noteSave(id,v){db.collection(\'cdbsActions\').doc(id).update({noteText:String(v||\'\').slice(0,200),updatedAt:new Date().toISOString()});}\nfunction untick(id){db.collection(\'cdbsActions\').doc(id).update({doneAt:firebase.firestore.FieldValue.delete(),doneNote:firebase.firestore.FieldValue.delete(),updatedAt:new Date().toISOString()});}\n\n\nfunction setTab(t){window._tab=t;document.getElementById(\'tabList\').style.background=t===\'list\'?\'#2F6B4F\':\'#f2f2f5\';document.getElementById(\'tabList\').style.color=t===\'list\'?\'#fff\':\'#3c3c43\';document.getElementById(\'tabReact\').style.background=t===\'react\'?\'#2F6B4F\':\'#f2f2f5\';document.getElementById(\'tabReact\').style.color=t===\'react\'?\'#fff\':\'#3c3c43\';if(window._all)renderSnapshotAgain();}\nfunction renderSnapshotAgain(){var ev=window._all||[];if(window._tab===\'react\'){document.getElementById(\'open\').style.display=\'none\';var dcp=document.getElementById(\'dc\');if(dcp)dcp.parentElement.style.display=\'none\';renderReactPage(ev);}else{document.getElementById(\'reactPage\').style.display=\'none\';document.getElementById(\'open\').style.display=\'\';var dcp2=document.getElementById(\'dc\');if(dcp2)dcp2.parentElement.style.display=\'\';}}\nfunction rOut(id,oc,extra){var upd={outcome:oc,updatedAt:new Date().toISOString()};if(oc===\'booked\'||oc===\'texted\'||oc===\'offlist\'){upd.doneAt=new Date().toISOString();}if(oc===\'offlist-pending\'){}if(oc===\'__clear\'){upd={outcome:firebase.firestore.FieldValue.delete(),updatedAt:new Date().toISOString()};}if(oc===\'followup\'){if(!extra){alert(\'Pick the follow-up date first.\');return;}upd.due=extra;}db.collection(\'cdbsActions\').doc(id).update(upd);}\nfunction rNote(id,val){if(!val.trim())return;var it=(window._all||[]).find(function(x){return x.id===id;});var log=[];try{log=JSON.parse((it&&it.notesLog)||\'[]\');}catch(e){log=[];}if(!log.length&&it&&it.noteText)log.push({t:it.noteText,d:it.updatedAt||it.createdAt,dest:\'local\'});log.push({t:val.trim().slice(0,300),d:new Date().toISOString(),dest:\'local\'});db.collection(\'cdbsActions\').doc(id).update({notesLog:JSON.stringify(log),noteText:\'\',updatedAt:new Date().toISOString()});}\nfunction rCard(i,tod){var done=!!i.doneAt;var lab={offlist:\'off list — inactivated ✓\',texted:\'no answer — texted\',booked:\'booked in\'};var bal=\'\';if(i.kind===\'reactcdbs\'){if(i.balanceText){var w2=i.balanceChecked?new Date(i.balanceChecked).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'}):\'\';if(/not eligible/i.test(i.balanceText)){bal=\'<span class="chip" style="background:#fdecec;color:#c0392b;font-weight:700;">Not eligible · \'+w2+\'</span>\';}else{var m2=String(i.balanceText).match(/\\$\\s?([\\d,]+(?:\\.\\d+)?)/);if(m2&&Number(m2[1].replace(/,/g,\'\'))<100){bal=\'<span class="chip" style="background:#fdecec;color:#c0392b;font-weight:700;">$\'+m2[1]+\' left · \'+w2+\'</span>\';}else{bal=m2?\'<span class="chip" style="background:#e6f4ec;color:#1d7a46;font-weight:700;">$\'+m2[1]+\' available · \'+w2+\'</span>\':\'<span class="chip">checked \'+w2+\'</span>\';}}}else{bal=\'<span class="chip" style="background:#f2f2f5;color:#6e6e73;">balance not checked</span>\';}}\nvar st=\'\';if(done){st=\'<span class="chip" style="background:#e6f4ec;color:#1d7a46;">\'+(lab[i.outcome]||\'done\')+\'</span>\';}else if(i.due&&i.due>tod){st=\'<span class="chip" style="background:#eef2ff;color:#5e5ce6;">follow-up \'+i.due.slice(8,10)+\'/\'+i.due.slice(5,7)+\'</span>\';}\nvar log=[];try{log=JSON.parse(i.notesLog||\'[]\');}catch(e){}if(!log.length&&i.noteText)log=[{t:i.noteText,d:i.updatedAt||i.createdAt,dest:\'local\'}];\nvar logH=log.map(function(n){var w=new Date(n.d).toLocaleDateString(\'en-AU\',{day:\'2-digit\',month:\'2-digit\'});return n.dest===\'principle\'?\'<div style="background:#e6f4ec;color:#1d7a46;border-radius:8px;padding:5px 10px;font-size:12px;margin-top:4px;">✓ \'+w+\' sent to Principle: \'+esc(n.t)+\'</div>\':\'<div style="background:#f2f2f5;color:#3c3c43;border-radius:8px;padding:5px 10px;font-size:12px;margin-top:4px;">\'+w+\' saved: \'+esc(n.t)+\'</div>\';}).join(\'\');\nvar pend=!done&&i.outcome===\'offlist-pending\';\nvar pills=pend?(\'<div class="row" style="margin-top:7px;background:#fff4e0;border-radius:9px;padding:8px 10px;"><span style="color:#9a6b00;font-size:12px;font-weight:600;">⚠ Make them inactive in Principle, then:</span> \'+(i.plink?\'<a href="https://app.principle.dental\'+esc(i.plink)+\'" target="_blank" style="font-size:12px;">open file ↗</a> \':\'\')+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'offlist\\\')" style="border:none;border-radius:99px;padding:4px 11px;background:#1d7a4622;color:#1d7a46;font-weight:600;cursor:pointer;font-size:12px;">Done — made inactive</button><button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'__clear\\\')" style="border:none;border-radius:99px;padding:4px 11px;background:#f2f2f5;color:#6e6e73;cursor:pointer;font-size:12px;">Cancel</button></div>\')\n:(\'<div class="row" style="margin-top:7px;flex-wrap:wrap;gap:5px;">\'\n+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'booked\\\')" style="border:none;border-radius:99px;padding:5px 11px;background:\'+(i.outcome===\'booked\'?\'#1d7a4622\':\'#f2f2f5\')+\';color:\'+(i.outcome===\'booked\'?\'#1d7a46\':\'#6e6e73\')+\';font-weight:600;cursor:pointer;font-size:12px;">Booked in</button>\'\n+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'texted\\\')" style="border:none;border-radius:99px;padding:5px 11px;background:\'+(i.outcome===\'texted\'?\'#9a6b0022\':\'#f2f2f5\')+\';color:\'+(i.outcome===\'texted\'?\'#9a6b00\':\'#6e6e73\')+\';font-weight:600;cursor:pointer;font-size:12px;">No answer — text pt</button>\'\n+\'<button onclick="rOut(\\\'\'+i.id+\'\\\',\\\'offlist-pending\\\')" style="border:none;border-radius:99px;padding:5px 11px;background:#f2f2f5;color:#6e6e73;font-weight:600;cursor:pointer;font-size:12px;">Take off list</button>\'\n+\'<button onclick="var d=this.nextElementSibling.value;rOut(\\\'\'+i.id+\'\\\',\\\'followup\\\',d)" style="border:none;border-radius:99px;padding:5px 11px;background:\'+(i.outcome===\'followup\'?\'#5e5ce622\':\'#f2f2f5\')+\';color:\'+(i.outcome===\'followup\'?\'#5e5ce6\':\'#6e6e73\')+\';font-weight:600;cursor:pointer;font-size:12px;">Follow-up ▸</button><input type="date" value="\'+(i.outcome===\'followup\'&&i.due?i.due:\'\')+\'" style="font:inherit;border:1px solid #d2d2d7;border-radius:7px;padding:3px;font-size:12px;">\'\n+\'</div>\');\nreturn \'<div style="padding:11px 0;border-bottom:1px solid #f0f0f3;"><div><strong>\'+esc(i.name)+\'</strong> \'+(i.mobile?\'<a href="tel:\'+esc(i.mobile).replace(/\\s+/g,\'\')+\'" style="color:#2F6B4F;font-weight:600;text-decoration:none;">\'+esc(i.mobile)+\'</a>\':\'\')+\' \'+(i.feeSched?\'<span class="chip">\'+esc(i.feeSched)+\'</span>\':\'\')+(i.lastVisit?\'<span class="chip">seen \'+esc(i.lastVisit)+\'</span>\':\'\')+(i.dob?\'<span class="chip">DOB \'+esc(i.dob)+\'</span>\':\'\')+\' \'+bal+\' \'+st+\'</div>\'+pills+logH\n+\'<div class="row" style="margin-top:6px;"><input type="text" placeholder="new note…" style="flex:1;min-width:170px;font:inherit;font-size:12px;border:1px solid #d2d2d7;border-radius:8px;padding:5px 9px;"><button onclick="rNote(\\\'\'+i.id+\'\\\',this.previousElementSibling.value);this.previousElementSibling.value=\\\'\\\'" style="border:none;border-radius:99px;padding:5px 12px;background:#f2f2f5;color:#3c3c43;cursor:pointer;font-size:12px;">Save here</button><button disabled title="Send from the clinic app — this page cannot drive Principle" style="border:none;border-radius:99px;padding:5px 12px;background:#f7f7f9;color:#b6b6bb;font-size:12px;">→ Principle & pin</button></div></div>\';}\nfunction renderReactPage(items){window._tab=\'react\';document.getElementById(\'open\').style.display=\'none\';var dcp=document.getElementById(\'dc\');if(dcp)dcp.parentElement.style.display=\'none\';var box=document.getElementById(\'reactPage\');box.style.display=\'block\';var tod=(function(){var d=new Date();return d.getFullYear()+\'-\'+String(d.getMonth()+1).padStart(2,\'0\')+\'-\'+String(d.getDate()).padStart(2,\'0\');})();\nvar q=(document.getElementById(\'rq\').value||\'\').trim().toLowerCase();var kinds=[[\'reactivation\',\'Reactivation Health funds/DVA\'],[\'reactcdbs\',\'Reactivation CDBS — under 18\']];var h=\'\';\nkinds.forEach(function(kk){var kind=kk[0],title=kk[1];var all=items.filter(function(i){return i.kind===kind;});var show;\nif(q){show=all.filter(function(i){return (i.name||\'\').toLowerCase().indexOf(q)>=0;});}\nelse{show=all.filter(function(i){return !i.doneAt&&!(i.due&&i.due>tod);});}\nvar notE=[];if(kind===\'reactcdbs\'&&!q){var prk=function(i){var t=i.balanceText||\'\';if(/not eligible/i.test(t))return true;var m=String(t).match(/\\$\\s?([\\d,]+(?:\\.\\d+)?)/);return !!(m&&Number(m[1].replace(/,/g,\'\'))<100);};notE=show.filter(prk);show=show.filter(function(i){return !prk(i);});}\nshow.sort(function(a,b){return String(a.name).localeCompare(String(b.name));});\nvar doneN=all.filter(function(i){return i.doneAt&&(Date.now()-Date.parse(i.doneAt))<180*86400000;});\ndoneN.sort(function(a,b){return String(b.doneAt).localeCompare(String(a.doneAt));});\nh+=\'<details class="dept" open><summary style="font-size:17px;font-weight:700;padding:12px 0;">\'+title+\' <span class="chip" style="background:\'+(show.length?\'#fdecec\':\'#e6f4ec\')+\';color:\'+(show.length?\'#c0392b\':\'#1d7a46\')+\';">\'+show.length+\'</span></summary>\'+(show.map(function(i){return rCard(i,tod);}).join(\'\')||\'<div class="muted">\'+(q?\'No match here.\':\'Nobody waiting — all clear.\')+\'</div>\')+(notE.length?\'<details style="margin-top:8px;"><summary class="muted" style="cursor:pointer;">Not eligible / under $100 (\'+notE.length+\') — parked; new CDBS years refill these</summary>\'+notE.map(function(i){return rCard(i,tod);}).join(\'\')+\'</details>\':\'\')+(!q&&doneN.length?\'<details style="margin-top:8px;"><summary class="muted" style="cursor:pointer;">Done (\'+doneN.length+\') — shown 180 days</summary>\'+doneN.map(function(i){return rCard(i,tod);}).join(\'\')+\'</details>\':\'\')+\'</details>\';});\nbox.innerHTML=h;}\n\n</script></body></html>';
 ipcMain.handle('share-html-get', () => NURSE_PAGE_HTML);
 ipcMain.handle('share-html-save', async () => {
   const picked = await dialog.showSaveDialog(mainWindow, { title: 'Save the Action List page', defaultPath: 'SDT-Action-List.html', filters: [{ name: 'Web page', extensions: ['html'] }] });
@@ -4121,10 +4015,13 @@ ipcMain.handle('stop-everything', () => {
   return { ok: true };
 });
 
-// One picker for every CDBS balance check - the screen buttons and the
-// daily auto top-up all choose their patients through here, so "fresh",
-// "stale" and "parked" mean the same thing everywhere.
-function pickCdbsBalanceTargets(items, scope, cap) {
+ipcMain.handle('reactcdbs-check', async (e, p) => {
+  if (noteWorkerBusy) return { ok: false, error: 'A note is being written to Principle - try again in a few seconds.' };
+  if (runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || morningState.running) {
+    return { ok: false, error: 'Something is already running - let it finish first.' };
+  }
+  let items;
+  try { items = await fsPull(); } catch (err) { return { ok: false, error: 'Cannot reach the shared list - check the connection and try again.' }; }
   const todayIso = localToday();
   const st = loadPatientState();
   const cards = items.filter(i => i.kind === 'reactcdbs' && !i.doneAt && !(i.due && i.due > todayIso) && i.patientId && !String(i.patientId).startsWith('name:'));
@@ -4135,7 +4032,7 @@ function pickCdbsBalanceTargets(items, scope, cap) {
     if (loc && mir) return (loc.w || '') >= (mir.w || '') ? loc : mir;
     return loc || mir;
   };
-  const fresh = (i) => { const b = balOf(i); if (!b || !b.w) return false; const d = daysSince(b.w); return d != null && d < 14; };   // checked within a fortnight
+  const fresh = (i) => { const b = balOf(i); return !!(b && b.w && localDateOf(b.w) === todayIso); };
   const notElig = (i) => {
     const b = balOf(i);
     if (!b) return false;
@@ -4144,74 +4041,22 @@ function pickCdbsBalanceTargets(items, scope, cap) {
     return !!(m && Number(m[1].replace(/,/g, '')) < 100);   // under $100: not worth a ring
   };
   let toCheck;
-  if (scope === 'noteligible') {
+  if (p.scope === 'noteligible') {
     // The monthly ritual: re-check everyone Medicare previously said no
     // to - eligibility resets with new entitlement years.
     toCheck = cards.filter(i => notElig(i) && !fresh(i));
-    toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
-  } else if (scope === 'unchecked') {
-    // Fill the blanks: every patient with no balance ever recorded. No cap.
-    toCheck = cards.filter(i => !balOf(i));
-    toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
   } else {
-    // Refresh: balance exists but is over a fortnight old. Stalest first,
-    // so the oldest information is always the next to be topped up.
-    // (Never-checked patients belong to the 'unchecked' scope - no overlap.)
-    toCheck = cards.filter(i => balOf(i) && !fresh(i) && !notElig(i));
-    toCheck.sort((x, y) => String((balOf(x) || {}).w || '').localeCompare(String((balOf(y) || {}).w || '')));
+    toCheck = cards.filter(i => !fresh(i) && !notElig(i));
   }
-  if (cap && toCheck.length > cap) toCheck = toCheck.slice(0, cap);
-  return toCheck;
-}
-
-ipcMain.handle('reactcdbs-check', async (e, p) => {
-  if (noteWorkerBusy) return { ok: false, error: 'A note is being written to Principle - try again in a few seconds.' };
-  if (runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || morningState.running) {
-    return { ok: false, error: 'Something is already running - let it finish first.' };
-  }
-  let items;
-  try { items = await fsPull(); } catch (err) { return { ok: false, error: 'Cannot reach the shared list - check the connection and try again.' }; }
-  const cap = (p.scope !== 'all' && p.scope !== 'noteligible' && p.scope !== 'unchecked') ? 20 : 0;
-  const toCheck = pickCdbsBalanceTargets(items, p.scope, cap);
-  if (!toCheck.length) {
-    const why = p.scope === 'unchecked'
-      ? 'Nothing to check - every linked patient on the list already has a balance recorded.'
-      : 'Nothing to check - every linked patient on the list was checked within the last fortnight.';
-    return { ok: false, error: why };
-  }
+  toCheck.sort((x, y) => String(x.name).localeCompare(String(y.name)));
+  if (p.scope !== 'all' && p.scope !== 'noteligible') toCheck = toCheck.slice(0, 20);
+  if (!toCheck.length) return { ok: false, error: 'Nothing to check - every linked patient on the list was already checked today.' };
   runAllState = { running: true, stopRequested: false, waitingForLogin: false };
   lastRunWasFile = true;   // sheet-only mode: no notes, no action-list feeding
-  runlogStart('react-cdbs-balances');
+  runlogStart('cdbs-balance-check');
   runManual(toCheck.map(i => ({ patientId: i.patientId, name: i.name, dob: i.dob || '' })));
   return { ok: true, count: toCheck.length };
 });
-
-// The daily top-up: chained onto the RUN ALL straight after the morning
-// run, while the PRODA session is still warm - so it costs zero extra
-// codes. Every never-checked patient first (no cap), then the stalest
-// balances over a fortnight old up to the job's daily quota.
-async function runReactCdbsBalancesJob(job) {
-  runlogStart('auto-cdbs-balances');
-  runlog('=== auto: ' + job.name + ' ===');
-  let items;
-  try { items = await fsPull(); } catch (err) {
-    runlog('shared list unreachable - job skipped');
-    return { outcome: 'skipped: shared list unreachable' };
-  }
-  const quota = Math.max(1, Math.min(200, Number(job.quota) || 20));
-  const unchecked = pickCdbsBalanceTargets(items, 'unchecked', 0);
-  const refresh = pickCdbsBalanceTargets(items, 'refresh', quota);
-  const toCheck = unchecked.concat(refresh);
-  runlog('targets: ' + unchecked.length + ' never checked + ' + refresh.length + ' stalest over 14 days (quota ' + quota + ')');
-  if (!toCheck.length) return { outcome: 'nothing to do - every balance is under a fortnight old' };
-  if (runAllState.running || runState.running || collectState.running || balanceState.running || genState.running || morningState.running) {
-    return { outcome: 'skipped: something else was still running' };
-  }
-  runAllState = { running: true, stopRequested: false, waitingForLogin: false };
-  lastRunWasFile = true;   // sheet-only mode: no notes, no action-list feeding
-  await runManual(toCheck.map(i => ({ patientId: i.patientId, name: i.name, dob: i.dob || '' })));
-  return { outcome: unchecked.length + ' unchecked + ' + refresh.length + ' refreshed (quota ' + quota + ') - dollar figures are on the cards' };
-}
 
 ipcMain.handle('patient-state-map', () => {
   try {
@@ -4368,10 +4213,6 @@ function saveNoteQueue(q) {
   try { fs.writeFileSync(noteQueuePath(), JSON.stringify(q, null, 2), 'utf8'); } catch (e) { /* ignore */ }
 }
 let noteWorkerBusy = false;
-// Initials only - patient names must never land in journals or the debug feed.
-function initialsOf(name) {
-  return String(name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + '.').join(' ') || '?';
-}
 
 function queueNote(entry) {
   const q = loadNoteQueue();
@@ -4413,22 +4254,21 @@ async function noteWorker() {
       const login = await ensurePrincipleForJobs();
       if (!login.ok) {
         en.tries++; saveNoteQueue(q);
-        if (en.tries >= 8) { q.shift(); saveNoteQueue(q); markLedger(en.itemId, en.qid, 'failed', 'Principle login never came good'); appJournal('queued note DROPPED for ' + initialsOf(en.name) + ': Principle login never came good'); continue; }
+        if (en.tries >= 8) { q.shift(); saveNoteQueue(q); markLedger(en.itemId, en.qid, 'failed', 'Principle login never came good'); appJournal('queued note DROPPED for ' + en.name + ': Principle login never came good'); continue; }
         setTimeout(noteWorker, 60 * 1000); break;
       }
       const res = await engine.addNoteToPatient(en.patientId, en.note, en.name);
       if (res.ok) {
-        let pinnedOk = false;
-        if (en.pin) { try { pinnedOk = !!(await pinFreshNote(en.patientId, en.note, en.name)); } catch (e) { /* note landed; pin is decoration */ } }
+        if (en.pin) { try { await pinFreshNote(en.patientId, en.note, en.name); } catch (e) { /* note landed; pin is decoration */ } }
         q.shift(); saveNoteQueue(q);
         markLedger(en.itemId, en.qid, 'principle');
-        appJournal('note sent to Principle for ' + initialsOf(en.name) + (en.pin ? (pinnedOk ? ' (pinned)' : ' (note written, pin failed)') : ''));
+        appJournal('note sent to Principle for ' + en.name + (en.pin ? ' (pinned)' : ''));
       } else {
         en.tries++; saveNoteQueue(q);
         if (en.tries >= 5) {
           q.shift(); saveNoteQueue(q);
           markLedger(en.itemId, en.qid, 'failed', res.reason || 'rejected');
-          appJournal('queued note FAILED for ' + initialsOf(en.name) + ': ' + (res.reason || 'rejected'));
+          appJournal('queued note FAILED for ' + en.name + ': ' + (res.reason || 'rejected'));
         } else {
           setTimeout(noteWorker, 45 * 1000); break;
         }
@@ -4608,20 +4448,6 @@ function loadAutoJobs() {
       url: 'https://app.principle.dental/reporting/custom-reports/2VON7F8xHuej0nJ5NbEu',
       days: [1, 2, 3, 4, 5],
       time: '08:35',
-      enabled: true,
-      lastRun: null,
-    });
-  }
-  if (!s.jobs.find(j => j.id === 'react-cdbs-balances')) {
-    s.jobs.push({
-      id: 'react-cdbs-balances',
-      name: 'CDBS reactivation balances',
-      desc: 'Keeps the Reactivation CDBS list honest every day, riding the same warm PRODA session as the morning run (no extra code). First it checks every patient who has never had a balance looked up, then it refreshes the stalest balances over a fortnight old - up to the daily quota below, oldest information first. Dollar figures land on the cards ready for the calling session.',
-      url: '',
-      group: 'proda',
-      days: [1, 2, 3, 4, 5],
-      time: '08:30',
-      quota: 20,
       enabled: true,
       lastRun: null,
     });
@@ -5891,7 +5717,6 @@ async function runAutoJob(id) {
     else if (job.id === 'reactivation') result = await runReactivationJob(job);
     else if (job.id === 'react-cdbs') result = await runReactCdbsJob(job);
     else if (job.id === 'thankyou-cc') result = await runThankYouJob(job);
-    else if (job.id === 'react-cdbs-balances') result = await runReactCdbsBalancesJob(job);
     else if (job.id === 'noteligible-monthly') {
       const lm = job.lastRun && job.lastRun.when ? new Date(job.lastRun.when) : null;
       const nowD = new Date();
@@ -6038,7 +5863,6 @@ ipcMain.handle('auto-save', (e, p) => {
       if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) job.time = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
     }
   }
-  if (p.quota != null) { const q = Number(String(p.quota).replace(/\D/g, '')); if (q >= 1 && q <= 200) job.quota = q; }
   if (p.template != null) job.template = String(p.template).slice(0, 320);
   if (p.sender != null) job.sender = String(p.sender).slice(0, 20);
   job.enabled = !!p.enabled;
@@ -6096,21 +5920,6 @@ async function runAllCore(how, group) {
       morningState.running = false;
       results.push({ name: '14-day CDBS morning run', outcome: 'ERRORED: ' + String(e4).slice(0, 90) });
       appJournal('run all - morning run ERRORED: ' + String(e4).slice(0, 120));
-    }
-  }
-  // ---- CDBS reactivation balance top-up: rides the still-warm PRODA ----
-  // session from the morning run, so the day's balances cost zero codes.
-  const balJob = (s.jobs || []).find(j => j.id === 'react-cdbs-balances');
-  if (group === 'reports' && balJob && balJob.enabled) {
-    try {
-      beat('Run all: CDBS reactivation balances');
-      live('Topping up CDBS reactivation balances \u2014 progress in the Morning run card below\u2026');
-      const rB = await runAutoJob('react-cdbs-balances');
-      results.push({ name: balJob.name, outcome: (rB && rB.outcome) || (rB && rB.error) || 'done' });
-      appJournal('run all - "' + balJob.name + '": ' + ((rB && rB.outcome) || (rB && rB.error) || 'done'));
-    } catch (eB) {
-      results.push({ name: balJob.name, outcome: 'ERRORED: ' + String(eB).slice(0, 80) });
-      appJournal('run all - "' + balJob.name + '" ERRORED: ' + String(eB).slice(0, 100));
     }
   }
   beat('');
@@ -6585,7 +6394,6 @@ app.whenReady().then(async () => {
   try { await fleetSelfUpdate(); } catch (e) { /* start normally */ }
   createWindow(); proda.setLogger(runlog); principleReport.setLogger(runlog); maybeAutoRun();
   appJournal('app started');
-  healFurnitureStrikes();
   setTimeout(probePills, 20000);
   setInterval(probePills, 5 * 60 * 1000);
   // 6pm daily debrief: one Telegram message summarising every automation's

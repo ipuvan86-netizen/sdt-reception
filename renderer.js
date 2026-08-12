@@ -1694,17 +1694,6 @@ async function refreshAuto() {
         </div>
         <label class="muted" style="font-size:12px;"><input type="checkbox" data-en="${job.id}" ${job.enabled ? 'checked' : ''}> On</label>
       </div>
-      ${job.id === 'react-cdbs-balances' ? `
-      <div class="row" style="margin-top:10px;">
-        <span class="muted" style="font-size:12.5px;">Runs by itself at the end of the daily RUN ALL — no clock of its own.</span>
-        <span class="muted">Daily refresh quota:</span>
-        <input type="number" data-quota="${job.id}" value="${Number(job.quota) || 20}" min="1" max="200" style="width:70px; font:inherit; border:1px solid #d2d2d7; border-radius:8px; padding:6px;">
-        <span class="muted" style="font-size:12px;">stalest first — never-checked patients are always all checked</span>
-        <input type="hidden" data-time="${job.id}" value="${esc(job.time)}">
-        <button class="secondary" data-savejob="${job.id}" style="padding:6px 14px;">Save</button>
-        <span class="spacer"></span>
-        <button class="primary" data-runjob="${job.id}" style="padding:6px 14px;">Run now</button>
-      </div>` : `
       <div class="row" style="margin-top:10px;">
         <span class="muted">Days:</span>
         ${DAY_LABELS.map((d, idx) => `<label style="font-size:12px;"><input type="checkbox" data-day="${job.id}:${idx}" ${job.days.includes(idx) ? 'checked' : ''}>${d}</label>`).join('')}
@@ -1712,7 +1701,7 @@ async function refreshAuto() {
         <button class="secondary" data-savejob="${job.id}" style="padding:6px 14px;">Save</button>
         <span class="spacer"></span>
         <button class="primary" data-runjob="${job.id}" style="padding:6px 14px;">Run now</button>
-      </div>`}
+      </div>
       ${job.id === 'birthday' ? `
       <div class="row" style="margin-top:10px;">
         <textarea data-tmpl="${job.id}" style="flex:1; min-width:240px; font:inherit; border:1px solid #d2d2d7; border-radius:10px; padding:8px; font-size:13px;" rows="2">${esc(job.template || '')}</textarea>
@@ -1757,10 +1746,8 @@ async function refreshAuto() {
       const en = document.querySelector(`input[data-en="${id}"]`).checked;
       const tmplEl = document.querySelector(`textarea[data-tmpl="${id}"]`);
       const sndEl = document.querySelector(`input[data-sender="${id}"]`);
-      const qEl = document.querySelector(`input[data-quota="${id}"]`);
       await window.cdbs.autoSave({ id, days, time, enabled: en,
-        template: tmplEl ? tmplEl.value : null, sender: sndEl ? sndEl.value : null,
-        quota: qEl ? qEl.value : null });
+        template: tmplEl ? tmplEl.value : null, sender: sndEl ? sndEl.value : null });
       refreshAuto();
     });
   }
@@ -2033,10 +2020,6 @@ function cdbsParked(i) {
   return n === -1 || (n >= 0 && n < 100 && !!cdbsBalInfo(i));
 }
 function cdbsBalChip(i) {
-  if (i.balanceIssue) {
-    const wI = i.balanceChecked ? new Date(i.balanceChecked).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' }) : '?';
-    return `<span class="chip" style="background:#fff4e0; color:#9a6b00; font-weight:700;">${esc(i.balanceIssue)} · ${wI}</span>`;
-  }
   const bm = cdbsBalInfo(i);
   if (!bm) return '<span class="chip" style="background:#f2f2f5; color:#6e6e73;">balance not checked yet</span>';
   const when = bm.when ? new Date(bm.when).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' }) : '?';
@@ -2246,16 +2229,10 @@ $('cdbsSort').addEventListener('change', () => refreshReactCdbs(false));
 $('navReact').addEventListener('click', () => { showView2('viewReact'); refreshReact(); });
 $('navReactCdbs').addEventListener('click', () => { showView2('viewReactCdbs'); refreshBalMap().then(() => refreshReactCdbs()); });
 $('btnCdbsBatch').addEventListener('click', async () => {
-  if (!confirm('Refresh CDBS balances for up to 20 patients whose balance is more than a fortnight old?\n\nStalest first. One PRODA code, about 15 minutes. Progress shows on the CDBS / Medicare screen.')) return;
+  if (!confirm('Check CDBS balances for the first 20 patients not yet checked today?\n\nOne PRODA code, about 15 minutes. Progress shows on the CDBS / Medicare screen.')) return;
   const r = await window.cdbs.reactCdbsCheck({ scope: 'batch' });
   if (!r.ok) { alert(r.error || 'Could not start.'); return; }
-  $('cdbsCheckState').textContent = 'Refreshing ' + r.count + ' — balances appear on the cards as they land.';
-});
-$('btnCdbsUnchecked').addEventListener('click', async () => {
-  if (!confirm('Check every patient whose balance has NEVER been looked up?\n\nNo cap — about 45 seconds each, so a long list means a long session. One PRODA code. Progress shows on the CDBS / Medicare screen.')) return;
-  const r = await window.cdbs.reactCdbsCheck({ scope: 'unchecked' });
-  if (!r.ok) { alert(r.error || 'Could not start.'); return; }
-  $('cdbsCheckState').textContent = 'Checking ' + r.count + ' unchecked — balances appear on the cards as they land.';
+  $('cdbsCheckState').textContent = 'Checking ' + r.count + ' — balances appear on the cards as they land.';
 });
 $('btnCdbsNotElig').addEventListener('click', async () => {
   if (!confirm('Re-check CDBS eligibility for every ineligible patient?\n\nOne PRODA code. Anyone who comes back eligible moves onto the main list automatically.')) return;
@@ -2264,7 +2241,7 @@ $('btnCdbsNotElig').addEventListener('click', async () => {
   $('cdbsCheckState').textContent = 'Re-checking ' + r.count + ' — balances refresh as they land.';
 });
 $('btnCdbsAll').addEventListener('click', async () => {
-  if (!confirm('Check EVERYONE on this list whose balance is more than a fortnight old?\n\nA long job — hours for a big list. PRODA stays busy throughout. Best after close.')) return;
+  if (!confirm('Check EVERYONE on this list not yet checked today?\n\nA long job — hours for a big list. PRODA stays busy throughout. Best after close.')) return;
   const r = await window.cdbs.reactCdbsCheck({ scope: 'all' });
   if (!r.ok) { alert(r.error || 'Could not start.'); return; }
   $('cdbsCheckState').textContent = 'Checking ' + r.count + ' — balances appear on the cards as they land.';

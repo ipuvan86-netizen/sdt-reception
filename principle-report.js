@@ -247,26 +247,10 @@ async function generateReport(rangeDays, progress, reportUrl) {
   // minutes, not two.
   let sawRunning = false;
   const started = Date.now();
-  let screenCheckAt = Date.now() + 45000;
   while (Date.now() - started < 360000) {
     await waitMs(700);
     state = await runInPage(win, pageStateScript());
     if (!state || state.error) continue;
-    // A missing Run button reads as "report running" - but the calendar has
-    // no Run button either (2026-08-12: a run that never left the calendar
-    // "ran" for 6 minutes). Every 45s, prove the report screen is really
-    // there; if the census has no Run Report button, we lost the screen.
-    if (Date.now() > screenCheckAt && !state.runEnabled && !state.hasDownloadReport && !(state.downloadIconCount > 0)) {
-      screenCheckAt = Date.now() + 45000;
-      try {
-        const cs = await runInPage(win, buttonCensusScript());
-        const onReportScreen = Array.isArray(cs) && cs.some(b => /run report/i.test((b && b.raw) || ''));
-        if (!onReportScreen) {
-          repLog('report screen LOST - census has no Run Report button: ' + JSON.stringify(cs).slice(0, 600));
-          return { ok: false, reason: 'report-screen-lost' };
-        }
-      } catch (e) { /* census is evidence only */ }
-    }
     if (!state.runEnabled) {
       sawRunning = true;
       say('Report is running... (' + Math.round((Date.now() - started) / 1000) + 's — the full-year report takes a while)');
