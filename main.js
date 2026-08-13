@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-13.5';
+const APP_BUILD = '2026-08-13.6';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4115,23 +4115,44 @@ ipcMain.handle('react-outcome', (e, p) => {
 // only marked done AFTER Cellcast accepts the send - "texted" is
 // true by construction. A Principle note is auto-queued on success.
 const REACT_CDBS_SMS = 'Hi, this is Southside Dental Toowoomba. We tried to give you a call today - your child has Medicare CDBS funding available for their check-up and clean. You\'re welcome to book online at www.sdtoowoomba.com.au, reply to this message, or call us on (07) 4635 1444. We\'d love to see them soon!';
+// Health funds/DVA drafts. The right one is picked from the card's fee
+// schedule: DVA anywhere in it wins; a real fund name is spoken back to
+// the patient via {fund}; blank or Standard/None falls back to generic
+// wording that never claims a fund we can't see.
+const REACT_DVA_SMS = 'Hi, this is Southside Dental Toowoomba. We tried to give you a call today - as a DVA card holder, your dental care is covered and it\'s been a while since your last check-up. You\'re welcome to book online at www.sdtoowoomba.com.au, reply to this message, or call us on (07) 4635 1444. We\'d love to see you again soon!';
+const REACT_FUND_SMS = 'Hi, this is Southside Dental Toowoomba. We tried to give you a call today - it\'s been a while since your last check-up, and if you\'re still with {fund}, your extras usually cover a check-up and clean. You\'re welcome to book online at www.sdtoowoomba.com.au, reply to this message, or call us on (07) 4635 1444. We\'d love to see you again soon!';
+const REACT_GENERIC_SMS = 'Hi, this is Southside Dental Toowoomba. We tried to give you a call today - it\'s been a while since your last check-up, and your health fund extras usually cover a check-up and clean. You\'re welcome to book online at www.sdtoowoomba.com.au, reply to this message, or call us on (07) 4635 1444. We\'d love to see you again soon!';
 
-ipcMain.handle('react-sms-template', () => ({ ok: true, message: REACT_CDBS_SMS }));
+function reactSmsFor(it) {
+  if (!it) return REACT_GENERIC_SMS;
+  if (it.kind === 'reactcdbs') return REACT_CDBS_SMS;
+  const fund = String(it.feeSched || '').trim();
+  if (/\bDVA\b/i.test(fund)) return REACT_DVA_SMS;
+  if (fund && !/^(none|standard)$/i.test(fund)) return REACT_FUND_SMS.replace('{fund}', fund);
+  return REACT_GENERIC_SMS;
+}
+
+ipcMain.handle('react-sms-template', (e, p) => {
+  const a = loadActions();
+  const it = a.items.find(x => x.id === (p && p.id));
+  return { ok: true, message: reactSmsFor(it) };
+});
 
 ipcMain.handle('react-send-sms', async (e, p) => {
   const a = loadActions();
   const it = a.items.find(x => x.id === p.id);
   if (!it) return { ok: false, error: 'Item not found - refresh the list.' };
-  if (it.kind !== 'reactcdbs') return { ok: false, error: 'In-app texting is only wired for the Reactivation CDBS list.' };
+  if (it.kind !== 'reactcdbs' && it.kind !== 'reactivation') return { ok: false, error: 'In-app texting is only wired for the Reactivation lists.' };
   const num = normalizeMobile(it.mobile);
   if (!num) return { ok: false, error: 'No usable mobile on this patient (' + (it.mobile || 'blank') + ') - nothing can be sent.' };
-  const message = String(p.message || '').trim().slice(0, 600) || REACT_CDBS_SMS;
+  const message = String(p.message || '').trim().slice(0, 600) || reactSmsFor(it);
   const creds = cellcastCreds();
   if (!creds.key) return { ok: false, error: 'Cellcast key not found on this PC (is the Command Center installed here?).' };
   const r = await sendCellcastSms(creds.key, creds.sender, num, message);
   const initials = String(it.name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + '.').join(' ') || '?';
+  const smsTag = it.kind === 'reactcdbs' ? 'react-cdbs' : 'react-hf';
   if (!r.ok) {
-    appJournal('react-cdbs SMS FAILED for ' + initials + ' (' + num.slice(0, 7) + '...): ' + String(r.detail).slice(0, 120));
+    appJournal(smsTag + ' SMS FAILED for ' + initials + ' (' + num.slice(0, 7) + '...): ' + String(r.detail).slice(0, 120));
     return { ok: false, error: 'Cellcast rejected it: ' + r.detail };
   }
   // Send succeeded - NOW mark the card done and remember the send.
@@ -4150,7 +4171,7 @@ ipcMain.handle('react-send-sms', async (e, p) => {
   }
   saveActions(a);
   fsPush(it);
-  appJournal('react-cdbs SMS sent to ' + initials + ' (' + num.slice(0, 7) + '...)' + (noteQueued ? ', Principle note queued' : ', no Principle link - note skipped'));
+  appJournal(smsTag + ' SMS sent to ' + initials + ' (' + num.slice(0, 7) + '...)' + (noteQueued ? ', Principle note queued' : ', no Principle link - note skipped'));
   sendUi('actions-changed', {});
   return { ok: true, noteQueued };
 });

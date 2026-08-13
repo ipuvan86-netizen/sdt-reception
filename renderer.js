@@ -1960,7 +1960,7 @@ async function smsPanelOpen(id, cardEl) {
     return;
   }
   let tmpl = '';
-  try { const t = await window.cdbs.reactSmsTemplate(); tmpl = (t && t.message) || ''; } catch (e) { tmpl = ''; }
+  try { const t = await window.cdbs.reactSmsTemplate({ id }); tmpl = (t && t.message) || ''; } catch (e) { tmpl = ''; }
   const again = it.smsSentAt
     ? `<div style="background:#fdecec; color:#c0392b; border-radius:9px; padding:7px 11px; font-size:12.5px; font-weight:600; margin-bottom:9px;">⚠ Already texted ${new Date(it.smsSentAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })} — sending again anyway will text them twice.</div>`
     : '';
@@ -2183,9 +2183,9 @@ function wireReactBox(boxId) {
     const ro = e.target.closest('button[data-ro]');
     if (ro) {
       const [id, key] = ro.getAttribute('data-ro').split(':');
-      const it = (__items.list || []).find(x => x.id === id);
-      if (key === 'texted' && boxId === 'reactCdbsList') {
-        // CDBS: in-house texting - open the amber confirm panel, nothing marked yet.
+      if (key === 'texted' && (boxId === 'reactCdbsList' || boxId === 'reactList')) {
+        // Both reactivation lists: in-house texting - open the amber confirm
+        // panel (CDBS, DVA, named-fund or generic draft), nothing marked yet.
         const cardEl = ro.closest('div[style*="flex:1"]') || ro.parentElement;
         await smsPanelOpen(id, cardEl);
         return;
@@ -2198,10 +2198,6 @@ function wireReactBox(boxId) {
       }
       const r = await window.cdbs.reactOutcome({ id, outcome: key, date });
       if (!r.ok && r.error) alert(r.error);
-      if (r.ok && key === 'texted') {
-        // Health funds/DVA keeps the old hand-off: open the Command Center on their number.
-        if (it && it.mobile) window.cdbs.openExternal('tel:' + String(it.mobile).replace(/\s+/g, ''));
-      }
       myRefresh(); refreshActions();
       return;
     }
