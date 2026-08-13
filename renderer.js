@@ -1151,8 +1151,9 @@ async function refreshActions(fresh = true) {
           ${vwChip(i)}
           ${i.repeat ? `<span class="chip" title="repeats ${esc(i.repeat)}">↻</span>` : ''}
           ${twoStage && !i.stageDentist ? '<span class="chip" style="background:#fff4e0; color:#9a6b00;">needs dentist</span>' : ''}
+          ${i.kind === 'unpaid' && i.feeSched ? `<span class="chip">${esc(i.feeSched)}</span>` : ''}
           ${i.howTo ? `<a href="#" data-howto="${esc(i.howTo)}" class="chip" style="background:#eef2ff; color:#5e5ce6; text-decoration:none;">How to ↗</a>` : ''}</div>
-        <div class="muted" style="margin-top:3px;">${esc(i.context || '')}${i.context ? ' · ' : ''}${when}</div>
+        <div class="muted" style="margin-top:3px;">${esc(i.context || '')}${i.context ? ' · ' : ''}${i.owedTotal ? `<span style="color:#c0392b; font-weight:700;">owes $${esc(i.owedTotal)} in total</span> · ` : ''}${when}</div>
       </div>
       <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
       ${i.kind === 'unpaid' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${PEND_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : ''}
@@ -1238,7 +1239,7 @@ async function refreshActions(fresh = true) {
         + (pendTenants.map(i => {
             const d = pendDays(i);
             return `<div class="row" style="padding:8px 0 8px 12px; border-bottom:1px solid #f6f6f8;">
-              <div style="flex:1;"><strong>${esc(i.name)}</strong>${i.context ? ' <span class="muted" style="font-size:12px;">' + esc(i.context) + '</span>' : ''}
+              <div style="flex:1;"><strong>${esc(i.name)}</strong>${i.context ? ' <span class="muted" style="font-size:12px;">' + esc(i.context) + '</span>' : ''}${i.owedTotal ? ' <span style="color:#c0392b; font-weight:700; font-size:12px;">owes $' + esc(i.owedTotal) + ' in total</span>' : ''}
                 <span class="chip" style="background:${d >= 30 ? '#fdecec' : '#f2f2f5'}; color:${d >= 30 ? '#c0392b' : '#6e6e73'};">${esc(i.parked)} since ${new Date(i.parkedAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })}${d >= 30 ? ' — ' + d + ' days' : ''}</span>
               </div>
               <button class="secondary" data-unpark="${i.id}" style="font-size:11px; padding:5px 11px;">↩ Return to list</button>
