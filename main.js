@@ -3402,7 +3402,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-13.4';
+const APP_BUILD = '2026-08-13.5';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -5287,9 +5287,9 @@ async function runUnpaidJob(job) {
     const remRaw = remKey && o[remKey] !== '' ? Number(o[remKey]) : (totalKey && o[totalKey] !== '' ? Number(o[totalKey]) : NaN);
     const amount = isFinite(remRaw) ? '$' + remRaw.toFixed(2) : '';
     // Family-wide Total Outstanding: kept as its own field so both screens
-    // can paint it red. Only when it differs from this invoice's figure.
+    // can paint it red. Always shown when the report provides it.
     const owingRaw = owingKey && o[owingKey] !== '' ? Number(o[owingKey]) : NaN;
-    const owedTotal = (isFinite(owingRaw) && isFinite(remRaw) && Math.abs(owingRaw - remRaw) >= 0.01) ? owingRaw.toFixed(2) : '';
+    const owedTotal = isFinite(owingRaw) ? owingRaw.toFixed(2) : '';
     const feeRaw = feeKey ? String(o[feeKey] || '').trim() : '';
     const feeSched = (feeRaw && !/^(none|standard)$/i.test(feeRaw)) ? feeRaw : '';
     const freshCtx = [amount ? amount + ' remaining' : '', createdKey ? 'invoice ' + (o[createdKey] || '—') : ''].filter(Boolean).join(' · ');
