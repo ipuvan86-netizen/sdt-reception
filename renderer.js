@@ -1171,7 +1171,8 @@ async function refreshActions(fresh = true) {
   const doneF = done.filter(inView);
   const found = [...new Set([...open, ...sched, ...doneF, ...parkedAll].map(i => i.section || 'CDBS'))];
   const sections = [...preferred.filter(s => found.includes(s)), ...found.filter(s => !preferred.includes(s))];
-  const bySection = s => open.filter(i => (i.section || 'CDBS') === s);
+  const bySection = s => open.filter(i => (i.section || 'CDBS') === s)
+    .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' }));
   const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'Recalls': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
   window.__secCollapsed = window.__secCollapsed || {};
   let upcomingHtml = '';
@@ -1222,9 +1223,13 @@ async function refreshActions(fresh = true) {
       const on = window.__pendOpen[s] === L;
       return `<span class="chip" data-pendtoggle="${esc(s)}|${esc(L)}" style="background:${hot ? '#fdecec' : '#f2f2f5'}; color:${hot ? '#c0392b' : '#6e6e73'}; font-size:12px; cursor:pointer;">${esc(L)} ${tenants.length} ${on ? '▾' : '▸'}</span>`;
     }).join('');
+    // Self-heal: if the parked group being viewed has emptied (last item
+    // returned to list, or the daily report reconciled it), snap back to
+    // the live list — otherwise the pill vanishes and there is no way out.
+    if (window.__pendOpen[s] && !secParked.some(i => i.parked === window.__pendOpen[s])) delete window.__pendOpen[s];
     const pendViewLabel = window.__pendOpen[s];
     const pendTenants = pendViewLabel ? secParked.filter(i => i.parked === pendViewLabel)
-      .sort((x, y) => String(x.parkedAt || '').localeCompare(String(y.parkedAt || ''))) : [];
+      .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' })) : [];
     const pendRows = pendViewLabel
       ? `<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing ${esc(pendViewLabel)} — click the pill again for the live list. These auto-move to Done when they drop off the daily unpaid report; at 45 days they come back flagged for chasing.</div>`
         + (pendTenants.map(i => {
