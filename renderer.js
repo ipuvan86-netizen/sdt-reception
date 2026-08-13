@@ -76,13 +76,27 @@ function renderPreview() {
   }
   $('warnings').innerHTML = warnings.join('');
 
+  const autoDone = !!(preview.autoWrite && preview.autoWrite.attempted);
   $('previewSummary').innerHTML =
     `<span>Using column <strong>${esc(preview.linkColumnName || 'none')}</strong> to identify patients
      and <strong>${esc(preview.balanceColumnName || 'none')}</strong> for the balance.</span><br>` +
-    `${preview.readyCount} note${preview.readyCount === 1 ? '' : 's'} ready to write` +
-    (preview.skipCount ? `, ${preview.skipCount} skipped` : '') +
-    '. Nothing is written until you press the button.';
+    (autoDone
+      ? `${preview.autoWrite.done} note${preview.autoWrite.done === 1 ? '' : 's'} written and pinned` +
+        (preview.autoWrite.already ? `, ${preview.autoWrite.already} already done earlier` : '') +
+        (preview.autoWrite.failedWrites ? `, ${preview.autoWrite.failedWrites} failed (flagged to write by hand)` : '') +
+        (preview.skipCount ? `, ${preview.skipCount} skipped` : '') +
+        '. This table is the record of what was written.'
+      : `${preview.readyCount} note${preview.readyCount === 1 ? '' : 's'} ready to write` +
+        (preview.skipCount ? `, ${preview.skipCount} skipped` : '') +
+        '. Nothing is written until you press the button.');
 
+  const pillOf = it => {
+    if (it.status === 'done') return '<span class="pill done">Written</span>';
+    if (it.status === 'already-done') return `<span class="pill already">Already done</span><div class="detail" style="color:#854d0e">${esc(it.writeDetail || '')}</div>`;
+    if (it.status === 'failed') return `<span class="pill failed">Failed</span><div class="detail">${esc(it.writeDetail || '')}</div>`;
+    if (it.skip) return '<span class="pill skipped">Skipped</span>';
+    return '<span class="pill ready">Ready</span>';
+  };
   $('tbody').innerHTML = preview.items.map(it => `
     <tr class="${it.skip ? 'skipped' : ''}" id="row-${it.rowNumber}">
       <td>${it.rowNumber}</td>
@@ -90,11 +104,12 @@ function renderPreview() {
       <td>${esc(it.appointmentDate)}</td>
       <td>${esc(it.balance || it.balanceRaw || '—')}</td>
       <td class="note-text">${it.skip ? '<em>' + esc(it.skip) + '</em>' : esc(it.note)}</td>
-      <td id="status-${it.rowNumber}">
-        <span class="pill ${it.skip ? 'skipped' : 'ready'}">${it.skip ? 'Skipped' : 'Ready'}</span>
-      </td>
+      <td id="status-${it.rowNumber}">${pillOf(it)}</td>
     </tr>`).join('');
 
+  // After an auto-write there is nothing left to press — the button only
+  // shows for file loads and for weird runs held back by the tripwire.
+  show($('btnRun'), !autoDone);
   $('btnRun').disabled = preview.readyCount === 0;
   show($('stepCollect'), preview.items.some(i => i.patientId));
   show($('stepPreview'), true);
@@ -154,12 +169,26 @@ window.cdbs.onRunAllFinished((r) => {
   } else {
     $('fileRunState').innerHTML = '';
   }
+  const aw = r.preview && r.preview.autoWrite;
+  let headline;
+  if (aw && aw.weird) {
+    headline = `<strong>This run looked unusual, so NO notes were written.</strong>
+      ${r.failCount ? `<br>${r.failCount} patient${r.failCount === 1 ? ' was' : 's were'} not successful — the tripwire held the notes back.` : ''}
+      <br><br><strong>Read the table below, and press "Write these notes" only if it all checks out.</strong>`;
+  } else if (aw && aw.attempted) {
+    headline = `<strong>${aw.done} note${aw.done === 1 ? '' : 's'} written and pinned.</strong>` +
+      (aw.already ? `<br>${aw.already} already written earlier — left alone.` : '') +
+      (aw.failedWrites ? `<br>${aw.failedWrites} could not be written after 3 tries — flagged on the action list to write by hand.` : '') +
+      (r.failCount ? `<br>${r.failCount} patient${r.failCount === 1 ? ' was' : 's were'} not successful — each one's reason is in the table below.` : '') +
+      `<br><br>The table below is the record of what was written — nothing left to press.`;
+  } else {
+    headline = `<strong>Nothing needed writing this run.</strong>` +
+      (r.failCount ? `<br>${r.failCount} patient${r.failCount === 1 ? ' was' : 's were'} not successful — each one's reason is shown in the table below.` : '');
+  }
   $('runAllResult').innerHTML = `
     <div class="info">
-      <strong>${r.readyCount} note${r.readyCount === 1 ? '' : 's'} ready to write.</strong>
-      ${r.failCount ? `<br>${r.failCount} patient${r.failCount === 1 ? ' was' : 's were'} not successful — each one's reason is shown in the table below and in the spreadsheet, so they can be chased by hand.` : ''}
+      ${headline}
       ${r.file ? `<br>Spreadsheet saved to: ${esc(r.file)}` : ''}
-      <br><br><strong>Read the table below, then press "Write these notes".</strong> Nothing has been written yet.
     </div>
     ${r.sortedPdf ? `<div class="row" style="margin-top:10px;"><button class="secondary" id="btnSortedPdf">Open the sorted summary (PDF)</button></div>` : ''}
     ${r.callList ? `<div class="row" style="margin-top:10px;"><button class="secondary" id="btnCallList">Open the call list (CSV)</button></div>` : ''}`;

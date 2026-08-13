@@ -2180,6 +2180,14 @@ if (!gen.ok) {
   }
 
   const finalPreview = buildPreviewFromRows(merged);
+
+  // Auto-write the ready notes (the weird-run tripwire inside refuses if
+  // the run looks broken). A stopped run writes nothing.
+  if (!runAllState.stopRequested) {
+    try { await autoWriteNotes(finalPreview, 'Run the lot'); }
+    catch (e) { runlog('auto-write failed (non-fatal): ' + String(e).slice(0, 120)); }
+  }
+
   let sortedPdf = null;
   try {
     const stF = updateFailureMemory(finalPreview.items);
@@ -2661,6 +2669,13 @@ async function finishMorning(mergedRows, st, s, send, say, tg, trigger) {
   previewOut.readyCount = previewOut.items.filter(i => !i.skip).length;
   previewOut.skipCount = previewOut.items.filter(i => i.skip).length;
 
+  // Auto-write the ready notes (the weird-run tripwire inside refuses if
+  // the run looks broken). A stopped run writes nothing.
+  if (!morningState.stopRequested) {
+    try { await autoWriteNotes(previewOut, '14-day morning run'); }
+    catch (e) { runlog('auto-write failed (non-fatal): ' + String(e).slice(0, 120)); }
+  }
+
   let sortedPdf = null;
   try {
     runlog('tail: saving check memory...');
@@ -2692,50 +2707,26 @@ async function finishMorning(mergedRows, st, s, send, say, tg, trigger) {
     failCount: previewOut.items.filter(i => i.skip && !/unchanged/i.test(i.skip)).length,
   });
 
-  const ready = previewOut.readyCount;
+  const aw = previewOut.autoWrite || { attempted: false, weird: false, done: 0, already: 0, failedWrites: 0 };
   const unchanged = previewOut.items.filter(i => i.skip && /unchanged/i.test(i.skip)).length;
-  const failed = previewOut.items.length - ready - unchanged;
+  const failed = previewOut.items.filter(i => i.skip && !/unchanged/i.test(i.skip)).length;
   const total = previewOut.items.length;
 
-  // Tripwires: a weird-looking run gets no remote WRITE offer.
-  const weird = total === 0 || failed > Math.max(3, Math.round(total * 0.3));
-  let msg = 'CDBS morning run done: ' + ready + ' note' + (ready === 1 ? '' : 's') + ' ready to write, ' + unchanged + ' unchanged (no note needed), ' + failed + ' not successful.';
+  let msg;
+  if (aw.weird) {
+    // The tripwire fired: a broken-looking run writes nothing.
+    msg = 'CDBS morning run done, but it looked unusual (' + failed + ' of ' + total + ' not successful) - NO notes were written. Read the table at the desk and press "Write these notes" there if it all checks out.';
+  } else {
+    msg = 'CDBS morning run done: ' + aw.done + ' note' + (aw.done === 1 ? '' : 's') + ' written and pinned, ' + unchanged + ' unchanged (no note needed), ' + failed + ' not successful' +
+      (aw.already ? ', ' + aw.already + ' already written earlier' : '') +
+      (aw.failedWrites ? ', ' + aw.failedWrites + ' write failure' + (aw.failedWrites === 1 ? '' : 's') + ' flagged to write by hand' : '') + '.';
+  }
   if (sortedPdf && sortedPdf.counts) {
     const c = sortedPdf.counts;
     msg += ' Today: ' + c.low + ' new low balance, ' + c.notEligible + ' new not eligible, ' + c.fix + ' still to fix, ' + c.fine + ' newly fine, ' + c.unchanged + ' unchanged.' + (c.unaccounted ? ' ⚠ ' + c.unaccounted + ' NOT ACCOUNTED FOR - flagged on the action list.' : '') + ' The printable summary is waiting at the desk.';
   }
-  if (weird) {
-    msg += ' This run looks unusual, so notes can only be written from the desk today after reading the table.';
-    await tg(msg);
-    return;
-  }
-  if (ready === 0) {
-    await tg(msg + ' Nothing to write today.');
-    return;
-  }
-  if (trigger === 'desk') {
-    say('Desk run finished - the review table is open. Press "Write these notes" when checked.');
-    await tg(msg + ' (Desk run - write the notes from the review table at the desk.)');
-    return;
-  }
-  msg += ' Reply WRITE to write them now, or leave it for the desk. The review table is open there either way. This offer expires at midnight.';
+  if (trigger === 'desk') say('Desk run finished - the table below is the record of what was written.');
   await tg(msg);
-
-  const bk2 = beatKeeper('waiting for the WRITE go-ahead on Telegram');
-  const w = await telegram.waitForKeyword(s.telegramToken, s.telegramChatId, ['write'], midnightTonight(), () => morningState.stopRequested);
-  clearInterval(bk2);
-  if (!w.ok) return;
-  if (runState.running) {
-    await tg('Notes are already being written at the desk - leaving it alone.');
-    return;
-  }
-  const items = previewOut.items.filter(i => !i.skip);
-  await tg('Writing ' + items.length + ' note' + (items.length === 1 ? '' : 's') + ' now...');
-  const results = await runNotes(items);
-  const done = (results || []).filter(r => r.status === 'done').length;
-  const fail2 = (results || []).filter(r => r.status === 'failed').length;
-  const already = (results || []).filter(r => r.status === 'already-done').length;
-  await tg('Done: ' + done + ' written' + (already ? ', ' + already + ' were already written earlier' : '') + (fail2 ? ', ' + fail2 + ' failed - see the table at the desk' : '') + '.');
 }
 
 // ---------------------------------------------------------------------
@@ -2788,7 +2779,67 @@ function writeCallListCsv(items) {
 
 let lastRunWasFile = false;
 
-async function runManual(itemsIn) {
+// ---------------------------------------------------------------------
+// AUTO-WRITE — the trusted path.
+//
+// Every run the program produced itself (14-day morning run, desk RUN
+// ALL, reactivation balance checks) writes its ready notes into
+// Principle straight away: same wording, same first-note/changed/14-day
+// rules, same 3-tries-then-flag retry loop, same pin-and-verify, same
+// note memory. The review table stays, but its job changes from "press
+// the button" to "this is the record of what was written".
+//
+// Brakes that stay on:
+//   - the weird-run tripwire: an empty run, or one where too many
+//     patients failed, writes NOTHING and raises the alarm instead —
+//     a broken page must never mass-write wrong notes
+//   - junk PRODA replies never became notes in the first place
+//     (classifyProda sends them to the fix pile)
+//   - file-loaded sheets stay sheet-only, exactly as before
+// ---------------------------------------------------------------------
+async function autoWriteNotes(previewOut, label) {
+  const total = previewOut.items.length;
+  const failed = previewOut.items.filter(i => i.skip && !/unchanged/i.test(i.skip)).length;
+  const weird = total === 0 || failed > Math.max(3, Math.round(total * 0.3));
+  const toWrite = previewOut.items.filter(i => !i.skip && i.note && i.patientId);
+  const aw = { attempted: false, weird, done: 0, already: 0, failedWrites: 0 };
+  previewOut.autoWrite = aw;
+  if (weird) {
+    runlog('auto-write REFUSED (' + label + '): run looks unusual (' + failed + ' of ' + total + ' not successful) - nothing written');
+    alarmPing('CDBS ' + label + ': the run looked unusual (' + failed + ' of ' + total + ' not successful), so NO notes were auto-written. Review the table at the desk and write from there.');
+    return aw;
+  }
+  if (!toWrite.length) { runlog('auto-write (' + label + '): nothing to write'); return aw; }
+  if (runState.running) { runlog('auto-write (' + label + '): a note run is already going - left alone'); return aw; }
+  runlog('auto-write (' + label + '): writing ' + toWrite.length + ' note(s)...');
+  aw.attempted = true;
+  const results = await runNotes(toWrite);
+  if (!results) {
+    // runNotes bailed before writing anything (Principle needs a login).
+    aw.attempted = false;
+    runlog('auto-write (' + label + '): Principle needs a login - nothing written, will write on the next run');
+    alarmPing('CDBS ' + label + ': Principle needs a login, so notes were NOT written. Sign in at the desk - they will write on the next run.');
+    return aw;
+  }
+  for (const r of results) {
+    const it = previewOut.items.find(x => x.rowNumber === r.rowNumber);
+    if (!it) continue;
+    it.status = r.status;
+    it.writeDetail = r.detail || '';
+  }
+  aw.done = results.filter(r => r.status === 'done').length;
+  aw.already = results.filter(r => r.status === 'already-done').length;
+  aw.failedWrites = results.filter(r => r.status === 'failed').length;
+  runlog('auto-write (' + label + '): ' + aw.done + ' written' +
+    (aw.already ? ', ' + aw.already + ' already done earlier' : '') +
+    (aw.failedWrites ? ', ' + aw.failedWrites + ' FAILED - flagged on the action list to write by hand' : ''));
+  if (aw.failedWrites) alarmPing('CDBS ' + label + ': ' + aw.failedWrites + ' note(s) could not be written after 3 tries - each is flagged "write by hand" on the action list.');
+  return aw;
+}
+
+async function runManual(itemsIn, opts) {
+  opts = opts || {};                                  // { writeNotes, label }
+  pinAudit = { written: 0, pinned: 0, failed: [] };   // fresh audit per run
   const send = (channel, payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
   };
@@ -2891,6 +2942,15 @@ async function runManual(itemsIn) {
   try { file = writeBalancesCsv(merged); } catch (e) { /* ignore */ }
 
   const finalPreview = buildPreviewFromRows(merged);
+
+  // Reactivation balance checks now write and pin their notes, with the
+  // same rules and the same tripwire as the 14-day run. File-loaded
+  // sheets never pass writeNotes, so they stay sheet-only.
+  if (opts.writeNotes && !runAllState.stopRequested) {
+    try { await autoWriteNotes(finalPreview, opts.label || 'balance check'); }
+    catch (e) { runlog('auto-write failed (non-fatal): ' + String(e).slice(0, 120)); }
+  }
+
   let callList = null;
   let sortedPdf = null;
   try {
@@ -3402,7 +3462,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-13.6';
+const APP_BUILD = '2026-08-13.7';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4052,9 +4112,13 @@ ipcMain.handle('reactcdbs-check', async (e, p) => {
   if (p.scope !== 'all' && p.scope !== 'noteligible') toCheck = toCheck.slice(0, 20);
   if (!toCheck.length) return { ok: false, error: 'Nothing to check - every linked patient on the list was already checked today.' };
   runAllState = { running: true, stopRequested: false, waitingForLogin: false };
-  lastRunWasFile = true;   // sheet-only mode: no notes, no action-list feeding
+  lastRunWasFile = true;   // no action-list bucket feeding (no appointments here);
+                           // notes DO auto-write now via the writeNotes option
   runlogStart('cdbs-balance-check');
-  runManual(toCheck.map(i => ({ patientId: i.patientId, name: i.name, dob: i.dob || '' })));
+  runManual(
+    toCheck.map(i => ({ patientId: i.patientId, name: i.name, dob: i.dob || '' })),
+    { writeNotes: true, label: 'reactivation balance check' }
+  );
   return { ok: true, count: toCheck.length };
 });
 
