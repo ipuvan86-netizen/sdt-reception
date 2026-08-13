@@ -158,6 +158,7 @@ function pageStateScript() {
       hasDownloadReport: !!dlReport,
       hasDownloadPresent: !!dlPresent,
       dataRowCount: Math.max(document.querySelectorAll('mat-row').length, document.querySelectorAll('tbody tr').length),
+      firstRowText: (function(){ var r = document.querySelector('mat-row') || document.querySelector('tbody tr'); return r ? String(r.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 120) : ''; })(),
       downloadIconCount: dlIcons.length,
     };
   })()`;
@@ -234,18 +235,30 @@ async function generateReport(rangeDays, progress, reportUrl) {
   }
 
   // --- run the report (its saved "This Year" range; trimmed in main.js) ---
+  // Snapshot what's on screen BEFORE Run is pressed: the screen opens
+  // already showing the PREVIOUS run's results, download button and all.
+  // Freshness below is proven against this snapshot.
+  const preSig = (state.dataRowCount || 0) + '|' + (state.firstRowText || '');
+  repLog('pre-run results snapshot: ' + preSig.slice(0, 140));
   say('Running the report...');
   const clicked = await runInPage(win, clickRunScript());
   if (!clicked || !clicked.ok) {
     return { ok: false, reason: 'could-not-run', detail: clicked };
   }
 
-  // The Run Report button disables while the report runs. Watch for that,
-  // then wait for it to come back — with a plain time fallback in case the
-  // run is so quick the disabled moment is missed. The saved "This Year"
-  // range makes this a big report (hundreds of rows), so the run gets six
-  // minutes, not two.
+  // FRESHNESS GUARD (14 Aug: a patient booked at 7:09 was missing from the
+  // 7:21 CSV while visibly in the report — the old 6-second early exit had
+  // downloaded the PREVIOUS run's results, which sit on screen with a live
+  // Download button from the moment the page opens). The rule now: never
+  // download until this run is PROVEN fresh — either the Run button was
+  // seen disabled and came back (a run really happened), or the results
+  // signature (row count + first row) changed from the pre-run snapshot.
+  // If neither proof arrives, Run is pressed once more (the first click can
+  // be swallowed), and an unproven run FAILS LOUDLY rather than ever
+  // handing back stale rows. The run gets six minutes, not two.
   let sawRunning = false;
+  let proven = false;
+  let repressed = false;
   const started = Date.now();
   while (Date.now() - started < 360000) {
     await waitMs(700);
@@ -256,9 +269,26 @@ async function generateReport(rangeDays, progress, reportUrl) {
       say('Report is running... (' + Math.round((Date.now() - started) / 1000) + 's — the full-year report takes a while)');
       continue;
     }
-    if (sawRunning) break;                                  // ran, now finished
-    if (Date.now() - started > 6000 &&
-        (state.hasDownloadReport || state.downloadIconCount > 0)) break;   // finished before we looked
+    if (sawRunning) {                                       // ran, now finished
+      proven = true;
+      repLog('run observed and finished after ' + Math.round((Date.now() - started) / 1000) + 's - results are fresh');
+      break;
+    }
+    const sigNow = (state.dataRowCount || 0) + '|' + (state.firstRowText || '');
+    if (sigNow !== preSig) {                                // results visibly changed
+      proven = true;
+      repLog('results changed from the pre-run snapshot after ' + Math.round((Date.now() - started) / 1000) + 's - fresh');
+      break;
+    }
+    if (!repressed && Date.now() - started > 20000) {
+      repressed = true;
+      repLog('no run observed after 20s - pressing Run Report once more');
+      await runInPage(win, clickRunScript());
+    }
+  }
+  if (!proven) {
+    repLog('report freshness NOT PROVEN after ' + Math.round((Date.now() - started) / 1000) + 's - REFUSING to download possibly stale results');
+    return { ok: false, reason: 'report-freshness-not-proven', detail: state };
   }
 
   // The Download Report button appears once the results table has built
