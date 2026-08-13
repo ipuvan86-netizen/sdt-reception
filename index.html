@@ -118,6 +118,7 @@
   <div class="navitem active" id="navHome">Home</div>
   <div class="navitem" id="navReact">Reactivation Health funds/DVA</div>
   <div class="navitem" id="navReactCdbs">Reactivation CDBS</div>
+  <div class="navitem" id="navReactRecall">Reactivation Recall 8-36m</div>
   <div class="navitem" id="navAuto">Auto Reports</div>
   <div class="navitem" id="navCdbs">CDBS / Medicare</div>
   <div id="workerBadge" class="muted" style="margin-top:14px; font-size:11.5px; padding:0 14px; display:none;">Viewer — daily schedules off</div>
@@ -195,6 +196,17 @@
     </div>
     <div class="muted" style="margin-top:4px;">Ring, pick the outcome, note it. "Send to Principle" writes and pins the note in their file — otherwise it stays here. Rung patients stay off this list for 180 days.</div>
     <div id="reactList" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<div id="viewReactRecall" class="hidden">
+  <div class="card">
+    <div class="row">
+      <div class="cardTitle">Reactivation Recall — not seen 8-36 months</div>
+      <input type="text" id="reactRecallSearch" placeholder="Search any patient — incl. already called…" style="margin-left:auto; width:280px;">
+    </div>
+    <div class="muted" style="margin-top:4px;">Patients overdue for their check-up &amp; clean. Ring, pick the outcome, note it — "No answer — text pt" sends the "we haven't seen you since…" SMS. Rung patients stay off this list for 180 days.</div>
+    <div id="reactRecallList" style="margin-top:14px;"></div>
   </div>
 </div>
 

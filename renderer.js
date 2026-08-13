@@ -927,7 +927,7 @@ async function pollEngineBusy() {
     if (b.busy) document.getElementById('runModalText').textContent = 'Working: ' + (b.stage || 'a run is in progress');
     document.body.classList.toggle('engbusy', !!b.busy);
     if (__busyWas && !b.busy) {
-      refreshBalMap().then(() => { refreshReactCdbs(false); refreshReact(false); });
+      refreshBalMap().then(() => { refreshReactCdbs(false); refreshReact(false); refreshReactRecall(false); });
     }
     __busyWas = !!b.busy;
   } catch (e) { /* ignore */ }
@@ -1079,7 +1079,7 @@ const PEND_LABELS = ['Denticare current', 'CDBS pending', 'DVA pending', 'Gov vo
 function pendDays(i) { return i.parkedAt ? Math.floor((Date.now() - Date.parse(i.parkedAt)) / 86400000) : 0; }
 
 async function refreshActions(fresh = true) {
-  const all0 = (await getItems(fresh)).filter(i => i.kind !== 'reactivation' && i.kind !== 'reactcdbs');   // reactivation lives on its own screens
+  const all0 = (await getItems(fresh)).filter(i => i.kind !== 'reactivation' && i.kind !== 'reactcdbs' && i.kind !== 'reactrecall');   // reactivation lives on its own screens
   if (typingInside($('actionItems'))) return;   // never eat a half-written note
   const a = { items: all0, synced: __items.synced !== false };
   // The never-lie rule: an unreachable cloud is said out loud, not
@@ -1576,7 +1576,7 @@ function renderViewsBox(vCfg, names) {
 
 // ---------- Auto Reports ----------
 function showView2(which) {
-  for (const [v, n] of [['viewHome','navHome'], ['viewReact','navReact'], ['viewReactCdbs','navReactCdbs'], ['viewAuto','navAuto'], ['viewCdbs','navCdbs']]) {
+  for (const [v, n] of [['viewHome','navHome'], ['viewReact','navReact'], ['viewReactCdbs','navReactCdbs'], ['viewReactRecall','navReactRecall'], ['viewAuto','navAuto'], ['viewCdbs','navCdbs']]) {
     document.getElementById(v).classList.toggle('hidden', which !== v);
     document.getElementById(n).classList.toggle('active', which === v);
   }
@@ -2179,7 +2179,7 @@ async function refreshReactKind(kind, boxId, searchId, fresh) {
 }
 function wireReactBox(boxId) {
   const box = $(boxId);
-  const myRefresh = () => (boxId === 'reactCdbsList' ? refreshReactCdbs(true) : refreshReact(true));
+  const myRefresh = () => (boxId === 'reactCdbsList' ? refreshReactCdbs(true) : boxId === 'reactRecallList' ? refreshReactRecall(true) : refreshReact(true));
   box.addEventListener('click', async (e) => {
     const nr = e.target.closest('button[data-noteretry]');
     if (nr) {
@@ -2212,7 +2212,7 @@ function wireReactBox(boxId) {
     const ro = e.target.closest('button[data-ro]');
     if (ro) {
       const [id, key] = ro.getAttribute('data-ro').split(':');
-      if (key === 'texted' && (boxId === 'reactCdbsList' || boxId === 'reactList')) {
+      if (key === 'texted' && (boxId === 'reactCdbsList' || boxId === 'reactList' || boxId === 'reactRecallList')) {
         // Both reactivation lists: in-house texting - open the amber confirm
         // panel (CDBS, DVA, named-fund or generic draft), nothing marked yet.
         const cardEl = ro.closest('div[style*="flex:1"]') || ro.parentElement;
@@ -2258,10 +2258,14 @@ function refreshReact(fresh = true) { return refreshReactKind('reactivation', 'r
 function refreshReactCdbs(fresh = true) { return refreshReactKind('reactcdbs', 'reactCdbsList', 'reactCdbsSearch', fresh); }
 wireReactBox('reactCdbsList');
 $('reactCdbsSearch').addEventListener('input', () => refreshReactCdbs(false));
+function refreshReactRecall(fresh = true) { return refreshReactKind('reactrecall', 'reactRecallList', 'reactRecallSearch', fresh); }
+wireReactBox('reactRecallList');
+$('reactRecallSearch').addEventListener('input', () => refreshReactRecall(false));
 $('cdbsSort').addEventListener('change', () => refreshReactCdbs(false));
 
 $('navReact').addEventListener('click', () => { showView2('viewReact'); refreshReact(); });
 $('navReactCdbs').addEventListener('click', () => { showView2('viewReactCdbs'); refreshBalMap().then(() => refreshReactCdbs()); });
+$('navReactRecall').addEventListener('click', () => { showView2('viewReactRecall'); refreshReactRecall(); });
 $('btnCdbsBatch').addEventListener('click', async () => {
   if (!confirm('Check CDBS balances for the first 20 patients not yet checked today?\n\nOne PRODA code, about 15 minutes. Progress shows on the CDBS / Medicare screen.')) return;
   const r = await window.cdbs.reactCdbsCheck({ scope: 'batch' });
