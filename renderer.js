@@ -1075,7 +1075,7 @@ function actionAge(iso) {
   const d = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
   return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days';
 }
-const PEND_LABELS = ['Denticare current', 'CDBS pending', 'DVA pending', 'Gov voucher pending'];
+const PEND_LABELS = ['Denticare current', 'CDBS pending', 'DVA pending', 'Gov voucher pending', 'Investigating'];
 function pendDays(i) { return i.parkedAt ? Math.floor((Date.now() - Date.parse(i.parkedAt)) / 86400000) : 0; }
 
 async function refreshActions(fresh = true) {
