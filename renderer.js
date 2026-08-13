@@ -1216,22 +1216,25 @@ async function refreshActions(fresh = true) {
     window.__doneOpen = window.__doneOpen || {};
     window.__pendOpen = window.__pendOpen || {};
     const secParked = parkedAll.filter(i => (i.section || 'CDBS') === s);
+    // Self-heal first: if the parked group being viewed has emptied (last
+    // item returned to list, or the daily report reconciled it), snap back
+    // to the live list before the pills are drawn.
+    if (window.__pendOpen[s] && !secParked.some(i => i.parked === window.__pendOpen[s])) delete window.__pendOpen[s];
     const pendPills = PEND_LABELS.map(L => {
       const tenants = secParked.filter(i => i.parked === L);
       if (!tenants.length) return '';
       const hot = tenants.some(i => pendDays(i) >= 30);
       const on = window.__pendOpen[s] === L;
-      return `<span class="chip" data-pendtoggle="${esc(s)}|${esc(L)}" style="background:${hot ? '#fdecec' : '#f2f2f5'}; color:${hot ? '#c0392b' : '#6e6e73'}; font-size:12px; cursor:pointer;">${esc(L)} ${tenants.length} ${on ? '▾' : '▸'}</span>`;
+      const bg = on ? '#1d7a46' : (hot ? '#fdecec' : '#f2f2f5');
+      const fg = on ? '#fff' : (hot ? '#c0392b' : '#6e6e73');
+      return `<span class="chip" data-pendtoggle="${esc(s)}|${esc(L)}" style="background:${bg}; color:${fg}; font-size:12px; cursor:pointer; font-weight:${on ? '700' : '400'};">${esc(L)} ${tenants.length} ${on ? '−' : '+'}</span>`;
     }).join('');
-    // Self-heal: if the parked group being viewed has emptied (last item
-    // returned to list, or the daily report reconciled it), snap back to
-    // the live list — otherwise the pill vanishes and there is no way out.
-    if (window.__pendOpen[s] && !secParked.some(i => i.parked === window.__pendOpen[s])) delete window.__pendOpen[s];
     const pendViewLabel = window.__pendOpen[s];
     const pendTenants = pendViewLabel ? secParked.filter(i => i.parked === pendViewLabel)
       .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' })) : [];
+    const pendHotN = pendTenants.filter(i => pendDays(i) >= 30).length;
     const pendRows = pendViewLabel
-      ? `<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing ${esc(pendViewLabel)} — click the pill again for the live list. These auto-move to Done when they drop off the daily unpaid report; at 45 days they come back flagged for chasing.</div>`
+      ? `<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing ${esc(pendViewLabel)} — click the green pill (−) to go back to the live list.${pendHotN ? ' <span style="color:#c0392b; font-weight:600;">' + pendHotN + ' waiting 30+ days.</span>' : ''} These auto-move to Done when they drop off the daily unpaid report; at 45 days they come back flagged for chasing.</div>`
         + (pendTenants.map(i => {
             const d = pendDays(i);
             return `<div class="row" style="padding:8px 0 8px 12px; border-bottom:1px solid #f6f6f8;">
@@ -1259,11 +1262,11 @@ async function refreshActions(fresh = true) {
         <span class="chip" style="background:${items.length ? '#fdecec' : '#e6f4ec'}; color:${items.length ? '#c0392b' : '#1d7a46'}; font-size:12px; margin-left:8px;">${items.length}</span>
         ${needsDent ? `<span class="chip" style="background:#fff4e0; color:#9a6b00; font-size:12px;">${needsDent} need dentist</span>` : ''}
         ${overdueN ? `<span class="chip" style="background:#fdecec; color:#c0392b; font-size:12px;">${overdueN} overdue 50d+</span>` : ''}
-        ${schItems.length ? `<span class="chip" data-schtoggle="${esc(s)}" style="background:#f2f2f5; color:#6e6e73; font-size:12px; cursor:pointer;">${schItems.length} scheduled ${window.__schOpen[s] ? '▾' : '▸'}</span>` : ''}
+        ${schItems.length ? `<span class="chip" data-schtoggle="${esc(s)}" style="background:${window.__schOpen[s] ? '#1d7a46' : '#f2f2f5'}; color:${window.__schOpen[s] ? '#fff' : '#6e6e73'}; font-size:12px; cursor:pointer; font-weight:${window.__schOpen[s] ? '700' : '400'};">${schItems.length} scheduled ${window.__schOpen[s] ? '−' : '+'}</span>` : ''}
         ${pendPills}
-        ${doneItems.length ? `<span class="chip" data-donetoggle="${esc(s)}" style="background:#e6f4ec; color:#1d7a46; font-size:12px; cursor:pointer;">${doneItems.length} done ${window.__doneOpen[s] ? '▾' : '▸'}</span>` : ''}
+        ${doneItems.length ? `<span class="chip" data-donetoggle="${esc(s)}" style="background:${window.__doneOpen[s] ? '#1d7a46' : '#f2f2f5'}; color:${window.__doneOpen[s] ? '#fff' : '#6e6e73'}; font-size:12px; cursor:pointer; font-weight:${window.__doneOpen[s] ? '700' : '400'};">${doneItems.length} done ${window.__doneOpen[s] ? '−' : '+'}</span>` : ''}
       </summary>${window.__doneOpen[s]
-        ? (`<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing done items — click the green pill again for the live list.</div>` + (doneRows || '<div class="muted" style="padding:8px;">None in the window.</div>'))
+        ? (`<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing done items — click the green pill (−) to go back to the live list.</div>` + (doneRows || '<div class="muted" style="padding:8px;">None in the window.</div>'))
         : (pendViewLabel ? pendRows : items.map(rowHtml).join('') + schRows)}</details>`;
   }).join('') + upcomingHtml : (upcomingHtml || '<div class="muted">Nothing waiting — all sorted.</div>'));
 
