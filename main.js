@@ -3395,15 +3395,29 @@ function dedupeSweep() {
     (groups[key] = groups[key] || []).push(it);
   }
   let cleaned = 0;
+  const rich = (it) => (it.outcome ? 4 : 0) + (it.doneAt ? 2 : 0) + (it.notesLog ? 2 : 0)
+    + (it.principleWritten ? 1 : 0) + (it.stageDentist || it.stageReception ? 1 : 0) + (it.noteText ? 1 : 0);
+  const richSort = (a, b) => (rich(b) - rich(a)) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+  const kill = (loser) => { loser.deleted = '1'; fsDelete(loser.id); cleaned++; };
   for (const g of Object.values(groups)) {
     if (g.length < 2) continue;
-    const rich = (it) => (it.outcome ? 4 : 0) + (it.doneAt ? 2 : 0) + (it.notesLog ? 2 : 0)
-      + (it.principleWritten ? 1 : 0) + (it.stageDentist || it.stageReception ? 1 : 0) + (it.noteText ? 1 : 0);
-    g.sort((a, b) => (rich(b) - rich(a)) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-    for (const loser of g.slice(1)) {
-      loser.deleted = '1';
-      fsDelete(loser.id);
-      cleaned++;
+    // LIFECYCLE RULE (14 Aug audit): repeating flags legitimately leave old
+    // DONE copies behind, and a fresh OPEN re-mint of the same identity is
+    // new work, not a duplicate - the old sweep kept the done museum piece
+    // and executed the live task (the Zandinan/Lilly assassination).
+    // So: opens dedupe among opens, dones among dones; a done copy only
+    // beats an open copy when the done-ness happened AFTER the open copy
+    // was born - the ghost-twin case, where the same real-world task was
+    // finished under a sibling id.
+    const opens = g.filter(x => !x.doneAt).sort(richSort);
+    const dones = g.filter(x => x.doneAt).sort(richSort);
+    for (const loser of opens.slice(1)) kill(loser);
+    for (const loser of dones.slice(1)) kill(loser);
+    const openKeeper = opens[0] || null;
+    const doneKeeper = dones[0] || null;
+    if (openKeeper && doneKeeper && openKeeper.createdAt
+        && String(doneKeeper.doneAt) > String(openKeeper.createdAt)) {
+      kill(openKeeper);   // ghost twin: finished elsewhere after this copy was minted
     }
   }
   // Resurrection pass: earlier sweeps grouped rebook items too loosely and
@@ -3538,7 +3552,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-14.3';
+const APP_BUILD = '2026-08-14.4';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
