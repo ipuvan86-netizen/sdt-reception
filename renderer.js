@@ -1099,7 +1099,7 @@ async function refreshActions(fresh = true) {
   const namesAll = [...new Set(all.map(i => i.assignee).filter(Boolean))].sort();
   window.__vNames = namesAll;
   window.__vSecs = (() => {
-    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Recalls', 'Complete notes', 'Huddle tags'];
+    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Not rebooked', 'Complete notes', 'Huddle tags'];
     const found = [...new Set(all.map(i => i.section || 'CDBS'))];
     return [...pref.filter(s => found.includes(s)), ...found.filter(s => !pref.includes(s))];
   })();
@@ -1186,16 +1186,16 @@ async function refreshActions(fresh = true) {
       </div>
       <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
       ${i.kind === 'unpaid' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${PEND_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : ''}
-      ${i.patientId && !String(i.patientId).startsWith('name:')
+      ${i.patientId && !/^(name:|recall:|appt:)/.test(String(i.patientId))
         ? `<button class="secondary engbtn" data-pinp="${i.id}" title="Write this note into their Principle file and pin it" style="font-size:11px; padding:5px 10px;">→ Principle</button>`
-        : `<button class="secondary" disabled title="No Principle link on this item" style="font-size:11px; padding:5px 10px; opacity:.4;">→ Principle</button>`}
+        : `<button class="secondary" disabled title="No Principle patient link on this item" style="font-size:11px; padding:5px 10px; opacity:.4;">→ Principle</button>`}
       <button class="secondary" data-del="${i.id}" title="Delete completely" style="padding:6px 12px;">✕</button>
     </div>`;
   };
 
   // Sections are discovered from the items themselves, preferred order
   // first, so new automations' sections appear without a UI change.
-  const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook'];   // urgent first, dentist sections last
+  const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Not rebooked'];   // urgent first, dentist sections last
   const parkedAll = open.filter(i => i.parked);
   open = open.filter(i => !i.parked);
   const doneF = done.filter(inView);
@@ -1203,7 +1203,7 @@ async function refreshActions(fresh = true) {
   const sections = [...preferred.filter(s => found.includes(s)), ...found.filter(s => !preferred.includes(s))];
   const bySection = s => open.filter(i => (i.section || 'CDBS') === s)
     .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' }));
-  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'Recalls': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
+  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'Not rebooked': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
   window.__secCollapsed = window.__secCollapsed || {};
   let upcomingHtml = '';
   if (sched.length) {
