@@ -1121,13 +1121,27 @@ async function refreshActions(fresh = true) {
     return (vCfg.rules[i.section || 'CDBS'] || []).filter(s => vKnown.has(s));
   };
   window.__vEffTags = effTags;
-  // Dentist views (a:) keep their assignment-driven behaviour: assigned
-  // items always show, tags can only ADD items, never hide assigned work.
-  // Custom views (v:) also show untagged items - the safety net.
+  // Hand-set audience ONLY - the 👁 chip on this specific item, ignoring
+  // whatever rule its section carries.
+  const manualTags = (i) => {
+    const m = String(i.viewsTag || '').trim();
+    if (!m || m === '*') return [];
+    return m.split(',').map(s => s.trim()).filter(s => vKnown.has(s));
+  };
+  // Dentist views (a:) are decided by the ASSIGNEE, full stop. A section
+  // rule can no longer add items here: because tags only ever ADD to a
+  // dentist view, a rule naming the practitioners put every practitioner's
+  // items in every dentist's view and quietly cancelled the assignee split
+  // (this is what happened to Complete notes, and to Huddle tags before
+  // it). A hand-set chip on one item still adds it - that stays as the
+  // deliberate escape hatch for covering someone else's list.
+  // Custom views (v:) are unchanged: they still follow section rules, and
+  // still show untagged items - the safety net.
   const inView = (i) => {
     if (!filt) return true;
-    const n = filt.slice(2), t = effTags(i);
-    if (filt.startsWith('a:')) return (i.assignee || '') === n || t.includes(n);
+    const n = filt.slice(2);
+    if (filt.startsWith('a:')) return (i.assignee || '') === n || manualTags(i).includes(n);
+    const t = effTags(i);
     return t.length === 0 || t.includes(n) || (i.assignee || '') === n;
   };
   const vwChip = (i) => {
