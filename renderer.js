@@ -1100,7 +1100,14 @@ async function refreshActions(fresh = true) {
   window.__vNames = namesAll;
   window.__vSecs = (() => {
     const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Not rebooked', 'Complete notes', 'Huddle tags'];
-    const found = [...new Set(all.map(i => i.section || 'CDBS'))];
+    // Only sections with something still ON SCREEN get a rule row. Long-dead
+    // done items used to keep retired section names listed here forever -
+    // which after the Recalls -> Not rebooked rename would have shown BOTH,
+    // side by side, with no way to tell which one was live. Rules are stored
+    // by name, so a section that returns later brings its audience with it.
+    const visible = all.filter(i => !i.doneAt
+      || (Date.now() - Date.parse(i.doneAt)) < ((i.kind === 'unpaid' ? 60 : 14) * 86400000));
+    const found = [...new Set(visible.map(i => i.section || 'CDBS'))];
     return [...pref.filter(s => found.includes(s)), ...found.filter(s => !pref.includes(s))];
   })();
   // Effective audience: a hand-set chip beats the section rule; '*' is an
