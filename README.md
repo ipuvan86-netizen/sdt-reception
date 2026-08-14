@@ -2,7 +2,7 @@
 
 Electron desktop app for Southside Dental Toowoomba. Automates the practice's morning: CDBS balance checks against PRODA/HPOS, patient file notes in Principle, birthday & thank-you SMS, and a cloud-shared action list (Firebase) used by every reception machine and the staff web page.
 
-**Current build: 2026-08-14.2** (the build number shows as a badge in the app header).
+**Current build: 2026-08-14.3** (the build number shows as a badge in the app header).
 
 ## Architecture
 

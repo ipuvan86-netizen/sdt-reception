@@ -1031,7 +1031,7 @@ async function pinFreshNote(patientId, noteText, patientName) {
   try {
     const win = BrowserWindow.getAllWindows().find(w =>
       !w.isDestroyed() && w.webContents.getURL().includes(patientId));
-    if (!win) { runlog('  pin: patient window not found — PIN FAILED'); pinAudit.failed.push(patientName || patientId); return; }
+    if (!win) { runlog('  pin: patient window not found — PIN FAILED'); pinAudit.failed.push(patientName || patientId); actionPinFailed(patientId, patientName); return; }
     const snippet = String(noteText).slice(0, 40);
     // Patience: slow timelines can take 15-20s to render the fresh note.
     for (let attempt = 1; attempt <= 12; attempt++) {
@@ -1042,22 +1042,33 @@ async function pinFreshNote(patientId, noteText, patientName) {
         await new Promise(r => setTimeout(r, 900));
         const after = await win.webContents.executeJavaScript(pinScript(snippet, 'verify'), true);
         const solid = after && after.census && after.census.some(c => c.icon === 'bookmark' && (c.mine || c.cdbs));
-        if (solid) { pinAudit.pinned++; runlog('  pin verified solid'); return; }
+        if (solid) {
+          pinAudit.pinned++; runlog('  pin verified solid');
+          try {
+            const a = loadActions();
+            let hit = false;
+            for (const x of a.items) if (!x.doneAt && x.kind === 'pin-note' && x.patientId === patientId) { x.doneAt = new Date().toISOString(); x.doneNote = 'pinned by the app'; hit = true; fsPush(x); }
+            if (hit) { saveActions(a); runlog('  action: pin-by-hand flag cleared - pin now solid'); }
+          } catch (e) { /* never break the run */ }
+          return;
+        }
         runlog('  pin click did not stick - trying again');
       }
       await new Promise(r => setTimeout(r, 2000));
     }
     runlog('  PIN FAILED after 12 attempts for "' + (patientName || patientId) + '"');
     pinAudit.failed.push(patientName || patientId);
+    actionPinFailed(patientId, patientName);
   } catch (e) {
     runlog('  pin failed (non-fatal): ' + String(e).slice(0, 120));
     pinAudit.failed.push(patientName || patientId);
+    actionPinFailed(patientId, patientName);
   }
 }
 
 // Every write that fails all its attempts becomes an Action item carrying
 // the ready-made note text — and clears itself the day a write succeeds.
-function actionWriteFailed(item) {
+function actionWriteFailed(item, text) {
   try {
     const a = loadActions();
     const exists = a.items.some(x => !x.doneAt && x.kind === 'write-note' && x.patientId === item.patientId);
@@ -1065,13 +1076,34 @@ function actionWriteFailed(item) {
     const it = {
       id: 'a' + Date.now() + Math.random().toString(36).slice(2, 6),
       patientId: item.patientId, name: item.name, kind: 'write-note', section: 'CDBS',
-      text: 'Write note by hand - automation failed', context: item.note || '',
+      text: text || 'Write note by hand - automation failed', context: item.note || '',
       token: 'write', createdAt: new Date().toISOString(),
     };
     a.items.push(it);
     saveActions(a);
     fsPush(it);
     runlog('  action: write-by-hand item created for "' + item.name + '"');
+  } catch (e) { /* never break the run */ }
+}
+// The note went in but the PIN did not stick (14 Aug audit: pin failures
+// were counted privately and flagged nowhere a human looks - Zoe Hill's
+// unpinned note had no trace at all). Now they land on the action list.
+function actionPinFailed(patientId, name) {
+  try {
+    if (!patientId) return;
+    const a = loadActions();
+    const exists = a.items.some(x => !x.doneAt && x.kind === 'pin-note' && x.patientId === patientId);
+    if (exists) return;
+    const it = {
+      id: 'a' + Date.now() + Math.random().toString(36).slice(2, 6),
+      patientId, name: name || '', kind: 'pin-note', section: 'CDBS',
+      text: 'Pin the CDBS note by hand - the note is in the file, the pin did not stick',
+      context: '', token: 'pin', createdAt: new Date().toISOString(),
+    };
+    a.items.push(it);
+    saveActions(a);
+    fsPush(it);
+    runlog('  action: pin-by-hand item created for "' + (name || patientId) + '"');
   } catch (e) { /* never break the run */ }
 }
 function actionWriteSucceeded(patientId) {
@@ -1125,6 +1157,10 @@ async function runNotes(items) {
     if (runState.stopRequested) break;
     const item = queue[i];
     const attemptNo = (attempts[item.rowNumber] = (attempts[item.rowNumber] || 0) + 1);
+
+    // Proof of life: without this, a write phase longer than 5 minutes was
+    // executed by the JAM WATCHDOG mid-queue (14 Aug: 8 of 16 notes cut).
+    beat('Writing notes - ' + (i + 1) + ' of ' + queue.length + ' (' + (item.name || '').slice(0, 30) + ')');
 
     send('run-progress', { index: i, total: queue.length, rowNumber: item.rowNumber, status: 'working' });
 
@@ -2860,6 +2896,16 @@ async function autoWriteNotes(previewOut, label) {
   aw.done = results.filter(r => r.status === 'done').length;
   aw.already = results.filter(r => r.status === 'already-done').length;
   aw.failedWrites = results.filter(r => r.status === 'failed').length;
+  // WRITE ACCOUNTING: queued vs attempted. A note never attempted (stop,
+  // crash, watchdog, power cut) must leave a visible flag, never silence.
+  const attemptedRows = new Set(results.map(r => r.rowNumber));
+  const unattempted = toWrite.filter(i => !attemptedRows.has(i.rowNumber));
+  aw.unattempted = unattempted.length;
+  if (unattempted.length) {
+    runlog('WRITE ACCOUNTING: ' + unattempted.length + ' queued note(s) never attempted (run interrupted) - flagged on the action list; they also retry next run');
+    for (const it of unattempted) actionWriteFailed(it, 'Write note by hand - the run was interrupted before this note');
+    alarmPing('CDBS ' + label + ': ' + unattempted.length + ' queued note(s) were never attempted (run interrupted). Each is flagged on the action list and retries on the next run.');
+  }
   runlog('auto-write (' + label + '): ' + aw.done + ' written' +
     (aw.already ? ', ' + aw.already + ' already done earlier' : '') +
     (aw.failedWrites ? ', ' + aw.failedWrites + ' FAILED - flagged on the action list to write by hand' : ''));
@@ -3492,7 +3538,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-14.2';
+const APP_BUILD = '2026-08-14.3';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
