@@ -832,7 +832,9 @@ function filterToWindow(objects, days) {
 // ---------------------------------------------------------------------
 // PREVIEW: work out exactly what would happen, without doing anything
 // ---------------------------------------------------------------------
-function buildPreview(objects) {
+function buildPreview(objects, opts) {
+  opts = opts || {};   // { reportSource: true } = a generated report, which has
+                       // no balance column - balances come from PRODA later.
   const headers = objects.length ? Object.keys(objects[0]) : [];
 
   const balanceKey = headers.find(h => h.toLowerCase() === BALANCE_COLUMN.toLowerCase())
@@ -876,7 +878,12 @@ function buildPreview(objects) {
       ? `The "${linkKey}" cell has no patient link in it`
       : 'No link column found in this file — cannot identify the patient';
     else if (cls.kind === 'invalid') skip = INVALID_SKIP;
-    else if (cls.kind === 'empty') skip = 'Balance cell is empty';
+    else if (cls.kind === 'empty' && !opts.reportSource) skip = 'Balance cell is empty';
+    // (14 Aug audit: on report-sourced runs EVERY row has an empty balance
+    // cell - the report has no balance column by design - and this skip was
+    // silently turning away every new patient at the details-reading stage.
+    // The skip now only means what it was built for: a hand-loaded sheet
+    // where an empty cell is a row the human hasn't filled in from PRODA.)
 
     return {
       rowNumber: idx + 2,               // +2 so it matches the spreadsheet row
@@ -1736,7 +1743,7 @@ ipcMain.handle('generate-report', async () => {
     if (rows.length < 2) {
       return { ok: false, error: 'The report downloaded but has no rows in it. It was saved to:\n' + res.file };
     }
-    const preview = buildPreview(filterToWindow(rowsToObjects(rows), REPORT_WINDOW_DAYS));
+    const preview = buildPreview(filterToWindow(rowsToObjects(rows), REPORT_WINDOW_DAYS), { reportSource: true });
     return { ok: true, file: path.basename(res.file), fullPath: res.file, preview };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -2078,7 +2085,7 @@ if (!gen.ok) {
   try {
     const rows = csvToRows(fs.readFileSync(gen.file).toString('utf8'));
     if (rows.length < 2) return fail('The report downloaded but had no rows in it. It was saved to: ' + gen.file);
-    preview = buildPreview(filterToWindow(rowsToObjects(rows), REPORT_WINDOW_DAYS));
+    preview = buildPreview(filterToWindow(rowsToObjects(rows), REPORT_WINDOW_DAYS), { reportSource: true });
   } catch (e) {
     return fail('The report downloaded but could not be read: ' + String(e));
   }
@@ -2180,6 +2187,13 @@ if (!gen.ok) {
   }
 
   const finalPreview = buildPreviewFromRows(merged);
+
+  // ACCOUNTING TRIPWIRE: every in-window patient must land in a bucket.
+  if (preview && preview.items && finalPreview.items.length !== preview.items.length) {
+    const diff = preview.items.length - finalPreview.items.length;
+    runlog('ACCOUNTING TRIPWIRE: ' + Math.abs(diff) + ' in-window patient(s) ' + (diff > 0 ? 'fell out of' : 'appeared beyond') + ' the run bookkeeping (' + finalPreview.items.length + ' rows for ' + preview.items.length + ' in window)');
+    alarmPing('CDBS Run the lot: ' + Math.abs(diff) + ' patient(s) unaccounted for in the run bookkeeping. This is a bug - tell Claude.');
+  }
 
   // Auto-write the ready notes (the weird-run tripwire inside refuses if
   // the run looks broken). A stopped run writes nothing.
@@ -2524,7 +2538,7 @@ async function morningRun(trigger) {
   try {
     const rows = csvToRows(fs.readFileSync(gen.file).toString('utf8'));
     if (rows.length < 2) return finishFail('The report came back with no rows in it.');
-    preview = buildPreview(filterToWindow(rowsToObjects(rows), REPORT_WINDOW_DAYS));
+    preview = buildPreview(filterToWindow(rowsToObjects(rows), REPORT_WINDOW_DAYS), { reportSource: true });
   } catch (e) {
     return finishFail('The report downloaded but could not be read.');
   }
@@ -2555,6 +2569,12 @@ async function morningRun(trigger) {
   }
   const needDetails = toCheck.filter(i => !hasFreshDetails(st, i.patientId) && !i.skip);
   const cachedDetails = toCheck.filter(i => hasFreshDetails(st, i.patientId));
+  // Chronic-rested patients stay in the run's bookkeeping (table, sheet,
+  // counts) instead of silently falling out of it - the audit's lesson.
+  const chronicRested = toCheck.filter(i => i.skip && !hasFreshDetails(st, i.patientId));
+  runlog('smart split: ' + linked.length + ' linked in window - ' + needDetails.length + ' need details read, '
+    + cachedDetails.length + ' checkable from cached details, ' + restedRows.length + ' rested (fresh), '
+    + chronicRested.length + ' chronic-rested, ' + unlinked.length + ' unlinked');
 
   // --- collect only what's missing ---
   let colRows = [];
@@ -2600,8 +2620,8 @@ async function morningRun(trigger) {
   // --- idle here until YES (all day; the prompt dies at midnight) ---
   if (!checkable.length) {
     for (const u of uncheckable) if (!u.skip) u.skip = u.reason ? medicareReasonText(u.reason) : 'could not be checked';
-    const merged = [...restedRows, ...uncheckable, ...unlinked];
-    await finishMorning(merged, st, s, send, say, tg, trigger);
+    const merged = [...restedRows, ...chronicRested, ...uncheckable, ...unlinked];
+    await finishMorning(merged, st, s, send, say, tg, trigger, preview.items.length);
     return;
   }
 
@@ -2647,18 +2667,28 @@ async function morningRun(trigger) {
   savePatientState(st);
 
   for (const u of uncheckable) if (!u.skip) u.skip = u.reason ? medicareReasonText(u.reason) : 'could not be checked';
-  const merged = [...bal.rows, ...restedRows, ...uncheckable, ...unlinked];
-  await finishMorning(merged, st, s, send, say, tg, trigger);
+  const merged = [...bal.rows, ...restedRows, ...chronicRested, ...uncheckable, ...unlinked];
+  await finishMorning(merged, st, s, send, say, tg, trigger, preview.items.length);
 }
 
 // Shared tail: build the review table (with the note rules applied), show it
 // at the desk, message the numbers, and offer WRITE if the run looks clean.
-async function finishMorning(mergedRows, st, s, send, say, tg, trigger) {
+async function finishMorning(mergedRows, st, s, send, say, tg, trigger, expectedCount) {
   trigger = trigger || 'desk';
   let file = null;
   try { file = writeBalancesCsv(mergedRows); } catch (e) { /* ignore */ }
 
   const previewOut = buildPreviewFromRows(mergedRows);
+
+  // ACCOUNTING TRIPWIRE (the audit's lasting lesson): every in-window
+  // patient must land in exactly one bucket. Any shortfall means a
+  // silent-drop bug and raises the alarm instead of hiding.
+  if (expectedCount != null && previewOut.items.length !== expectedCount) {
+    const diff = expectedCount - previewOut.items.length;
+    runlog('ACCOUNTING TRIPWIRE: ' + Math.abs(diff) + ' in-window patient(s) ' + (diff > 0 ? 'fell out of' : 'appeared beyond') + ' the run bookkeeping (' + previewOut.items.length + ' rows for ' + expectedCount + ' in window)');
+    alarmPing('CDBS morning run: ' + Math.abs(diff) + ' patient(s) unaccounted for (' + previewOut.items.length + ' rows for ' + expectedCount + ' in the 14-day window). This is a bug - tell Claude.');
+  }
+
   // Apply the note rules on top: unchanged balances become skips.
   for (const it of previewOut.items) {
     if (!it.skip && it.balance) {
@@ -3462,7 +3492,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-13.11';
+const APP_BUILD = '2026-08-14.2';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
