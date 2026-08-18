@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('cdbs', {
   actionDelete: (p) => ipcRenderer.invoke('action-delete', p),
   actionAdd: (p) => ipcRenderer.invoke('action-add', p),
   actionStage: (p) => ipcRenderer.invoke('action-stage', p),
+  denticareContacted: (p) => ipcRenderer.invoke('denticare-contacted', p),
   actionNote: (p) => ipcRenderer.invoke('action-note', p),
   actionViewsTag: (p) => ipcRenderer.invoke('action-views-tag', p),
   viewsConfigSet: (p) => ipcRenderer.invoke('views-config-set', p),

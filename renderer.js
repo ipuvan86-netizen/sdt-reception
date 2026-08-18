@@ -1100,7 +1100,7 @@ async function refreshActions(fresh = true) {
   const namesAll = [...new Set(all.map(i => i.assignee).filter(Boolean))].sort();
   window.__vNames = namesAll;
   window.__vSecs = (() => {
-    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook (dentist check)', 'No 6/12 rebooked', 'Complete notes', 'Huddle tags'];
+    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'Denticare', 'General', 'Routine', 'Checkouts', 'Rebook (dentist check)', 'No 6/12 rebooked', 'Complete notes', 'Huddle tags'];
     // Only sections with something still ON SCREEN get a rule row. Long-dead
     // done items used to keep retired section names listed here forever -
     // which after the Recalls -> Not rebooked rename would have shown BOTH,
@@ -1185,7 +1185,42 @@ async function refreshActions(fresh = true) {
         <input type="checkbox" data-stage="${i.id}:reception" ${i.stageReception ? 'checked' : ''} style="width:14px; height:14px;">Reception</label>
     </span>`;
 
+  // Denticare applications from the website form: full-detail card with
+  // one-tap copy on each field, Copy all, and a single "Contacted" stage.
+  // Tick box = fully done (plan set up or closed), same as everything else.
+  const denticareRowHtml = (i) => {
+    const contacted = i.outcome === 'contacted';
+    const stale = !contacted && (Date.now() - Date.parse(i.createdAt)) / 86400000 > 3;
+    const fieldRow = (label, val, copyKey) => !val ? '' : `
+      <div style="display:flex; align-items:center; gap:8px; padding:3px 0;">
+        <span class="muted" style="min-width:64px; font-size:12px;">${label}</span>
+        <span style="font-size:13.5px; font-weight:600; word-break:break-word;">${esc(val)}</span>
+        ${copyKey ? `<button data-dccopy="${i.id}|${copyKey}" title="Copy ${label.toLowerCase()}" style="border:none; background:#f2f2f5; color:#6e6e73; border-radius:8px; padding:3px 9px; cursor:pointer; font-size:12px; flex-shrink:0;">⧉</button>` : ''}
+      </div>`;
+    return `<div class="row" style="align-items:flex-start; padding:13px 0 13px 8px; border-bottom:1px solid #f0f0f3; ${contacted ? 'background:#fafdfb; border-radius:10px;' : ''}">
+      <input type="checkbox" data-tick="${i.id}" title="Fully done — plan set up or closed" style="width:20px; height:20px; margin-top:2px;">
+      <div style="flex:1;">
+        <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong> <span style="color:#3c3c43;">— Denticare application</span>
+          ${contacted ? `<span class="chip" style="background:#e6f4ec; color:#1d7a46;">contacted${i.contactedAt ? ' ' + new Date(i.contactedAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' }) : ''}</span>` : ''}
+          ${vwChip(i)}</div>
+        <div class="muted" style="margin-top:3px; ${stale ? 'color:#9a6b00;font-weight:600;' : ''}">applied ${actionAge(i.createdAt)}${i.amount ? ' · ' + esc(i.amount) : ''}${i.hadPlan ? ' · plan quoted: ' + esc(i.hadPlan) : ''}${i.preferredContact ? ' · prefers ' + esc(i.preferredContact) : ''}</div>
+        <div style="margin-top:6px; background:#f8fafc; border:1px solid #eef1f3; border-radius:10px; padding:7px 11px; max-width:520px;">
+          ${fieldRow('Phone', i.mobile, 'mobile')}
+          ${fieldRow('Email', i.email, 'email')}
+          ${fieldRow('Message', i.message, 'message')}
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button data-dccontact="${i.id}" style="border:none; cursor:pointer; border-radius:99px; padding:5px 13px; font-size:12px; font-weight:600; background:${contacted ? '#1d7a4622' : '#f2f2f5'}; color:${contacted ? '#1d7a46' : '#6e6e73'};">${contacted ? '✓ Contacted' : 'Contacted'}</button>
+          <button data-dccopyall="${i.id}" class="secondary" style="font-size:12px; padding:5px 12px;">⧉ Copy all</button>
+          <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:150px; font-size:12px; padding:6px 10px;">
+          <button class="secondary" data-del="${i.id}" title="Delete completely (spam only — tick Done for real applications)" style="padding:6px 12px;">✕</button>
+        </div>
+      </div>
+    </div>`;
+  };
+
   const rowHtml = (i) => {
+    if (i.kind === 'denticare') return denticareRowHtml(i);
     const stale = (Date.now() - Date.parse(i.createdAt)) / 86400000 > 3;
     const overdue = i.due && i.due < today;
     const when = i.due
@@ -1217,7 +1252,7 @@ async function refreshActions(fresh = true) {
 
   // Sections are discovered from the items themselves, preferred order
   // first, so new automations' sections appear without a UI change.
-  const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook (dentist check)', 'No 6/12 rebooked'];   // urgent first, dentist sections last
+  const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'Denticare', 'General', 'Routine', 'Checkouts', 'Rebook (dentist check)', 'No 6/12 rebooked'];   // urgent first, dentist sections last
   const parkedAll = open.filter(i => i.parked);
   open = open.filter(i => !i.parked);
   const doneF = done.filter(inView);
@@ -1225,7 +1260,7 @@ async function refreshActions(fresh = true) {
   const sections = [...preferred.filter(s => found.includes(s)), ...found.filter(s => !preferred.includes(s))];
   const bySection = s => open.filter(i => (i.section || 'CDBS') === s)
     .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' }));
-  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook (dentist check)': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'No 6/12 rebooked': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
+  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook (dentist check)': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Denticare': '#0E7C7B', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'No 6/12 rebooked': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
   window.__secCollapsed = window.__secCollapsed || {};
   let upcomingHtml = '';
   if (sched.length) {
@@ -1402,6 +1437,51 @@ async function refreshActions(fresh = true) {
     if (how) { e.preventDefault(); window.cdbs.openExternal(how.getAttribute('data-howto')); return; }
     const vwc = e.target.closest('span[data-vwchip]');
     if (vwc) { e.preventDefault(); openViewsEditor(vwc.getAttribute('data-vwchip')); return; }
+    // Denticare: one-tap field copy, Copy all, and the Contacted toggle.
+    const dcc = e.target.closest('button[data-dccopy]');
+    if (dcc) {
+      const parts = dcc.getAttribute('data-dccopy').split('|');
+      const it = (__items.list || []).find(x => x.id === parts[0]);
+      const val = it && it[parts[1]];
+      if (val) {
+        try {
+          await navigator.clipboard.writeText(String(val));
+          const t = dcc.textContent; dcc.textContent = '✓';
+          setTimeout(() => { dcc.textContent = t; }, 1600);
+        } catch (e2) { /* clipboard blocked - nothing sensible to do */ }
+      }
+      return;
+    }
+    const dca = e.target.closest('button[data-dccopyall]');
+    if (dca) {
+      const it = (__items.list || []).find(x => x.id === dca.getAttribute('data-dccopyall'));
+      if (it) {
+        const d = it.createdAt ? new Date(it.createdAt).toLocaleDateString('en-AU') : '';
+        const L = ['Denticare application — ' + d,
+          'Name: ' + (it.name || ''),
+          'Phone: ' + (it.mobile || '—'),
+          'Email: ' + (it.email || '—'),
+          'Preferred contact: ' + (it.preferredContact || '—'),
+          'Treatment amount: ' + (it.amount || '—'),
+          'Treatment plan with us: ' + (it.hadPlan || '—')];
+        if (it.message) L.push('Message: ' + it.message);
+        if (it.noteText) L.push('Note: ' + it.noteText);
+        try {
+          await navigator.clipboard.writeText(L.join('\n'));
+          const t = dca.textContent; dca.textContent = '✓ Copied';
+          setTimeout(() => { dca.textContent = t; }, 1600);
+        } catch (e2) { /* clipboard blocked */ }
+      }
+      return;
+    }
+    const dct = e.target.closest('button[data-dccontact]');
+    if (dct) {
+      dct.disabled = true;
+      const r2 = await window.cdbs.denticareContacted({ id: dct.getAttribute('data-dccontact') });
+      if (!r2.ok && r2.error) alert(r2.error);
+      refreshActions(true);
+      return;
+    }
     const del = e.target.closest('button[data-del]');
     if (del) {
       if (!confirm('Delete this item completely? It will not come back unless a future run re-finds it.')) return;
