@@ -1076,6 +1076,7 @@ function actionAge(iso) {
   return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days';
 }
 const PEND_LABELS = ['Denticare current', 'CDBS pending', 'DVA pending', 'Gov voucher pending', 'Investigating'];
+const REBOOK_PARK_LABELS = ['Treatment coordinator', 'No followup'];
 function pendDays(i) { return i.parkedAt ? Math.floor((Date.now() - Date.parse(i.parkedAt)) / 86400000) : 0; }
 
 async function refreshActions(fresh = true) {
@@ -1099,7 +1100,7 @@ async function refreshActions(fresh = true) {
   const namesAll = [...new Set(all.map(i => i.assignee).filter(Boolean))].sort();
   window.__vNames = namesAll;
   window.__vSecs = (() => {
-    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Not rebooked', 'Complete notes', 'Huddle tags'];
+    const pref = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook (dentist check)', 'No 6/12 rebooked', 'Complete notes', 'Huddle tags'];
     // Only sections with something still ON SCREEN get a rule row. Long-dead
     // done items used to keep retired section names listed here forever -
     // which after the Recalls -> Not rebooked rename would have shown BOTH,
@@ -1190,11 +1191,11 @@ async function refreshActions(fresh = true) {
     const when = i.due
       ? `<span class="${overdue ? 'due-over' : ''}">due ${i.due === today ? 'today' : i.due}${overdue ? ' — overdue' : ''}</span>`
       : `<span style="${stale ? 'color:#9a6b00;font-weight:600;' : ''}">waiting ${actionAge(i.createdAt)}</span>`;
-    const twoStage = (i.kind === 'checkout' || i.kind === 'rebook' || i.kind === 'recall');
+    const twoStage = (i.kind === 'checkout' || i.kind === 'recall');
     const halfDone = twoStage && (i.stageDentist || i.stageReception);
     const ovd = i.kind === 'unpaid' && i.escalated && !i.doneAt;
     return `<div class="row" style="align-items:flex-start; padding:13px 0 13px 8px; border-bottom:1px solid #f0f0f3; ${halfDone ? 'background:#fafdfb; border-radius:10px;' : ''}${ovd ? 'background:#fdf5f5; border-left:3px solid #c0392b; border-radius:10px;' : ''}">
-      ${twoStage ? stagePills(i) : `<input type="checkbox" data-tick="${i.id}" style="width:20px; height:20px; margin-top:2px;">`}
+      ${twoStage ? stagePills(i) : (i.kind === 'rebook' ? '' : `<input type="checkbox" data-tick="${i.id}" style="width:20px; height:20px; margin-top:2px;">`)}
       <div style="flex:1;">
         <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong>${i.text ? ' <span style="color:#3c3c43;">— ' + esc(i.text) + '</span>' : ''}
           ${i.assignee ? `<span class="chip">${esc(i.assignee)}</span>` : ''}
@@ -1206,17 +1207,17 @@ async function refreshActions(fresh = true) {
         <div class="muted" style="margin-top:3px;">${esc(i.context || '')}${i.context ? ' · ' : ''}${i.owedTotal ? `<span style="color:#c0392b; font-weight:700;">owes $${esc(i.owedTotal)} in total</span> · ` : ''}${when}</div>
       </div>
       <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
-      ${i.kind === 'unpaid' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${PEND_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : ''}
+      ${i.kind === 'unpaid' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${PEND_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : i.kind === 'rebook' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${REBOOK_PARK_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : ''}
       ${i.patientId && !/^(name:|recall:|appt:)/.test(String(i.patientId))
         ? `<button class="secondary engbtn" data-pinp="${i.id}" title="Write this note into their Principle file and pin it" style="font-size:11px; padding:5px 10px;">→ Principle</button>`
         : `<button class="secondary" disabled title="No Principle patient link on this item" style="font-size:11px; padding:5px 10px; opacity:.4;">→ Principle</button>`}
-      <button class="secondary" data-del="${i.id}" title="Delete completely" style="padding:6px 12px;">✕</button>
+      ${i.kind === 'rebook' ? '' : `<button class="secondary" data-del="${i.id}" title="Delete completely" style="padding:6px 12px;">✕</button>`}
     </div>`;
   };
 
   // Sections are discovered from the items themselves, preferred order
   // first, so new automations' sections appear without a UI change.
-  const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook', 'Not rebooked'];   // urgent first, dentist sections last
+  const preferred = ['Urgent', 'CDBS', 'Confirm appts', 'Reception attention', 'Unpaid invoices', 'General', 'Routine', 'Checkouts', 'Rebook (dentist check)', 'No 6/12 rebooked'];   // urgent first, dentist sections last
   const parkedAll = open.filter(i => i.parked);
   open = open.filter(i => !i.parked);
   const doneF = done.filter(inView);
@@ -1224,7 +1225,7 @@ async function refreshActions(fresh = true) {
   const sections = [...preferred.filter(s => found.includes(s)), ...found.filter(s => !preferred.includes(s))];
   const bySection = s => open.filter(i => (i.section || 'CDBS') === s)
     .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' }));
-  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'Not rebooked': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
+  const SEC_COLOR = { 'Urgent': '#ff3b30', 'CDBS': '#2F6B4F', 'Confirm appts': '#e2a93b', 'Checkouts': '#3478f6', 'Reception attention': '#af52de', 'Rebook (dentist check)': '#30b0c7', 'Unpaid invoices': '#bf5af2', 'Routine': '#5e5ce6', 'General': '#8e8e93', 'No 6/12 rebooked': '#ff9f0a', 'Complete notes': '#7a5af5', 'Huddle tags': '#0d9488' };
   window.__secCollapsed = window.__secCollapsed || {};
   let upcomingHtml = '';
   if (sched.length) {
@@ -1271,7 +1272,8 @@ async function refreshActions(fresh = true) {
     // item returned to list, or the daily report reconciled it), snap back
     // to the live list before the pills are drawn.
     if (window.__pendOpen[s] && !secParked.some(i => i.parked === window.__pendOpen[s])) delete window.__pendOpen[s];
-    const pendPills = PEND_LABELS.map(L => {
+    const parkLabels = (s === 'Rebook (dentist check)') ? REBOOK_PARK_LABELS : PEND_LABELS;
+    const pendPills = parkLabels.map(L => {
       const tenants = secParked.filter(i => i.parked === L);
       if (!tenants.length) return '';
       const hot = tenants.some(i => pendDays(i) >= 30);
@@ -1285,13 +1287,15 @@ async function refreshActions(fresh = true) {
       .sort((x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' })) : [];
     const pendHotN = pendTenants.filter(i => pendDays(i) >= 30).length;
     const pendRows = pendViewLabel
-      ? `<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing ${esc(pendViewLabel)} — click the green pill (−) to go back to the live list.${pendHotN ? ' <span style="color:#c0392b; font-weight:600;">' + pendHotN + ' waiting 30+ days.</span>' : ''} These auto-move to Done when they drop off the daily unpaid report; at 45 days they come back flagged for chasing.</div>`
+      ? `<div class="muted" style="padding:6px 0 2px 8px; font-size:12px;">Showing ${esc(pendViewLabel)} — click the green pill (−) to go back to the live list.${pendHotN && s !== 'Rebook (dentist check)' ? ' <span style="color:#c0392b; font-weight:600;">' + pendHotN + ' waiting 30+ days.</span>' : ''}${s === 'Rebook (dentist check)' ? ' Parked for good — they clear out by themselves once off the daily report, and a fresh item appears if the patient visits again without booking.' : ' These auto-move to Done when they drop off the daily unpaid report; at 45 days they come back flagged for chasing.'}</div>`
         + (pendTenants.map(i => {
             const d = pendDays(i);
+            const hotRow = d >= 30 && s !== 'Rebook (dentist check)';
             return `<div class="row" style="padding:8px 0 8px 12px; border-bottom:1px solid #f6f6f8;">
               <div style="flex:1;"><strong>${esc(i.name)}</strong>${i.context ? ' <span class="muted" style="font-size:12px;">' + esc(i.context) + '</span>' : ''}${i.owedTotal ? ' <span style="color:#c0392b; font-weight:700; font-size:12px;">owes $' + esc(i.owedTotal) + ' in total</span>' : ''}
-                <span class="chip" style="background:${d >= 30 ? '#fdecec' : '#f2f2f5'}; color:${d >= 30 ? '#c0392b' : '#6e6e73'};">${esc(i.parked)} since ${new Date(i.parkedAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })}${d >= 30 ? ' — ' + d + ' days' : ''}</span>
+                <span class="chip" style="background:${hotRow ? '#fdecec' : '#f2f2f5'}; color:${hotRow ? '#c0392b' : '#6e6e73'};">${esc(i.parked)} since ${new Date(i.parkedAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })}${hotRow ? ' — ' + d + ' days' : ''}</span>
               </div>
+              <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
               <button class="secondary" data-unpark="${i.id}" style="font-size:11px; padding:5px 11px;">↩ Return to list</button>
             </div>`;
           }).join('') || '<div class="muted" style="padding:8px;">None here.</div>')
@@ -1304,7 +1308,7 @@ async function refreshActions(fresh = true) {
         <label style="float:right; font-size:11px;"><input type="checkbox" data-tick="${i.id}" checked> undo</label>
         <button class="secondary" data-del="${i.id}" title="Delete completely" style="float:right; font-size:11px; padding:2px 8px; margin-right:8px;">✕</button>
       </div>`).join('') : '';
-    const needsDent = items.filter(i => (i.kind === 'checkout' || i.kind === 'rebook' || i.kind === 'recall') && !i.stageDentist).length;
+    const needsDent = items.filter(i => (i.kind === 'checkout' || i.kind === 'recall') && !i.stageDentist).length;
     const overdueN = items.filter(i => i.kind === 'unpaid' && i.escalated).length;
     const isOpen = window.__secCollapsed[s] === undefined ? (s === 'Urgent') : !window.__secCollapsed[s];   // clean by default; Urgent demands eyes
     return `<details class="dept" data-sec="${esc(s)}" ${isOpen ? 'open' : ''} style="margin-top:6px;">
