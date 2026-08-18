@@ -1297,7 +1297,7 @@ async function refreshActions(fresh = true) {
               </div>
               <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
               <button class="secondary" data-unpark="${i.id}" style="font-size:11px; padding:5px 11px;">↩ Return to list</button>
-              <button class="secondary" data-del="${i.id}" title="Delete completely" style="font-size:11px; padding:5px 11px;">✕</button>
+              <button class="secondary" data-markdone="${i.id}" title="Move to Done" style="font-size:11px; padding:5px 11px;">✓ Done</button>
             </div>`;
           }).join('') || '<div class="muted" style="padding:8px;">None here.</div>')
       : '';
@@ -1367,6 +1367,15 @@ async function refreshActions(fresh = true) {
     const up = e.target.closest('button[data-unpark]');
     if (up) {
       await window.cdbs.actionPark({ id: up.getAttribute('data-unpark'), label: null });
+      refreshActions(true);
+      return;
+    }
+    const md = e.target.closest('button[data-markdone]');
+    if (md) {
+      const mdId = md.getAttribute('data-markdone');
+      const mdNote = document.querySelector(`input[data-note="${mdId}"]`);
+      md.disabled = true; const mdRow = md.closest('.row'); if (mdRow) mdRow.style.opacity = '0.45';
+      await window.cdbs.actionTick({ id: mdId, note: mdNote ? mdNote.value : '' });
       refreshActions(true);
       return;
     }
