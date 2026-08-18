@@ -3322,7 +3322,7 @@ async function fbToken() {
   return fbTokInFlight;
 }
 
-const ACTION_KEYS = ['patientId', 'name', 'kind', 'text', 'context', 'token', 'createdAt', 'doneAt', 'doneNote', 'updatedAt', 'section', 'due', 'assignee', 'repeat', 'stageDentist', 'stageReception', 'noteText', 'howTo', 'escalated', 'outcome', 'attempts', 'principleWritten', 'plink', 'mobile', 'feeSched', 'lastVisit', 'notesLog', 'dob', 'deleted', 'balanceText', 'balanceChecked', 'owedTotal', 'parked', 'parkedAt', 'chaseFlag', 'viewsTag', 'viewsList', 'viewsRules', 'smsSentAt', 'email', 'preferredContact', 'amount', 'hadPlan', 'message', 'contactedAt'];
+const ACTION_KEYS = ['patientId', 'name', 'kind', 'text', 'context', 'token', 'createdAt', 'doneAt', 'doneNote', 'updatedAt', 'section', 'due', 'assignee', 'repeat', 'stageDentist', 'stageReception', 'noteText', 'howTo', 'escalated', 'outcome', 'attempts', 'principleWritten', 'plink', 'mobile', 'feeSched', 'lastVisit', 'notesLog', 'dob', 'deleted', 'balanceText', 'balanceChecked', 'owedTotal', 'parked', 'parkedAt', 'chaseFlag', 'viewsTag', 'viewsList', 'viewsRules', 'smsSentAt', 'email', 'preferredContact', 'amount', 'hadPlan', 'message', 'contactedAt', 'citizen', 'employed', 'frequency', 'startDate', 'ownAccount', 'rpTitle', 'rpName', 'rpPhone', 'rpDob', 'dcSteps', 'dcDepositMethod'];
 function itemToFields(it) {
   const f = {};
   for (const k of ACTION_KEYS) if (it[k] != null && it[k] !== '') f[k] = { stringValue: String(it[k]) };
@@ -3552,7 +3552,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-18.5';
+const APP_BUILD = '2026-08-18.7';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4267,18 +4267,19 @@ ipcMain.handle('react-outcome', (e, p) => {
 // Items are BORN IN THE CLOUD (written by the denticareApplication Cloud
 // Function on the website), so the fresh cloud copy is read first - the
 // local file is only the offline fallback, same pattern as updateActionList.
-// "Contacted" is a single half-way stage (toggle): rung the patient, plan
-// not finalised yet. The tick box remains the fully-done switch.
+// The "To finish" checklist state syncs through here: `steps` is a comma
+// list of ticked step ids (s1..s9) and `depositMethod` records how the
+// deposit was taken. Any machine can tick; last write wins. The tick box
+// on the row remains the only fully-done switch - never automatic.
 // ---------------------------------------------------------------------
-ipcMain.handle('denticare-contacted', async (e, p) => {
+ipcMain.handle('denticare-steps', async (e, p) => {
   let a;
   try { a = { items: await fsPull() }; } catch (err) { a = loadActions(); }
   const it = a.items.find(x => x.id === p.id);
   if (!it) return { ok: false, error: 'Item not found - it may have been actioned on another computer. Refresh and try again.' };
-  const now = new Date().toISOString();
-  if (it.outcome === 'contacted') { delete it.outcome; delete it.contactedAt; }
-  else { it.outcome = 'contacted'; it.contactedAt = now; }
-  it.updatedAt = now;
+  it.dcSteps = String(p.steps || '');
+  if (p.depositMethod !== undefined) it.dcDepositMethod = String(p.depositMethod || '');
+  it.updatedAt = new Date().toISOString();
   saveActions(a);
   fsPush(it);
   return { ok: true };

@@ -1185,35 +1185,102 @@ async function refreshActions(fresh = true) {
         <input type="checkbox" data-stage="${i.id}:reception" ${i.stageReception ? 'checked' : ''} style="width:14px; height:14px;">Reception</label>
     </span>`;
 
-  // Denticare applications from the website form: full-detail card with
-  // one-tap copy on each field, Copy all, and a single "Contacted" stage.
-  // Tick box = fully done (plan set up or closed), same as everything else.
+  // Denticare applications from the website form.
+  // Collapsed row: name + applied-age + amount + x/9 progress pill (+ red
+  // "not employed" flag). Two buttons open pre-rendered panels:
+  //   Details   - every answer with one-tap copy + Copy all + the note box
+  //   To finish - the 9-step set-up checklist (two phases, synced to the
+  //               cloud so any machine can tick steps), with an (i) expander
+  //               holding the full wording of each step, deposit-method
+  //               chips under step 5, and a pinned heading reminder.
+  // All 9 ticked => green "tick to complete" state; the tick box stays the
+  // only way to mark the item fully done (never automatic).
+  const DC_STEPS = [
+    { id: 's1', label: 'Amounts match', info: 'Check the total amount on this application is exactly the same as the treatment plan amount in Principle.' },
+    { id: 's2', label: 'Plan heading', info: 'In Principle, update the treatment plan heading to: Denticare \u2013 Pending' },
+    { id: 's3', label: 'Denticare portal', info: 'Create the plan in the Denticare portal. (How-to guide coming soon.)' },
+    { id: 's4', label: 'Deposit invoice', info: 'Create an invoice for the deposit.' },
+    { id: 's5', label: 'Deposit taken', info: 'Take the deposit, then pick how it was taken below. (Medipass / Tyro Health how-to coming soon.)', chips: ['Phone', 'Medipass', 'In person'] },
+    { id: 's6', label: 'Upload documents', info: 'Upload the Denticare schedule AND the corresponding treatment plan from Principle as PDF.', phase2: true },
+    { id: 's7', label: 'Totals reconcile', info: 'Confirm the total matches: Denticare scheduled amount + deposit = total plan amount.', phase2: true },
+    { id: 's8', label: 'Approve status', info: 'Update the Principle treatment plan status to: Denticare Plan Approved \u2013 $[total amount]', phase2: true },
+    { id: 's9', label: 'Patient tag', info: 'Add the patient tag: Denticare current', phase2: true },
+  ];
+  window.__dcOpen = window.__dcOpen || {};
   const denticareRowHtml = (i) => {
-    const contacted = i.outcome === 'contacted';
-    const stale = !contacted && (Date.now() - Date.parse(i.createdAt)) / 86400000 > 3;
+    const done = String(i.dcSteps || '').split(',').filter(Boolean);
+    const isDone = (sid) => done.indexOf(sid) !== -1;
+    const allDone = done.length >= DC_STEPS.length;
+    const stale = !allDone && done.length === 0 && (Date.now() - Date.parse(i.createdAt)) / 86400000 > 3;
+    const openD = !!window.__dcOpen[i.id + '|d'];
+    const openS = !!window.__dcOpen[i.id + '|s'];
+
     const fieldRow = (label, val, copyKey) => !val ? '' : `
       <div style="display:flex; align-items:center; gap:8px; padding:3px 0;">
-        <span class="muted" style="min-width:64px; font-size:12px;">${label}</span>
+        <span class="muted" style="min-width:74px; font-size:12px;">${label}</span>
         <span style="font-size:13.5px; font-weight:600; word-break:break-word;">${esc(val)}</span>
-        ${copyKey ? `<button data-dccopy="${i.id}|${copyKey}" title="Copy ${label.toLowerCase()}" style="border:none; background:#f2f2f5; color:#6e6e73; border-radius:8px; padding:3px 9px; cursor:pointer; font-size:12px; flex-shrink:0;">⧉</button>` : ''}
+        ${copyKey ? `<button data-dccopy="${i.id}|${copyKey}" title="Copy ${label.toLowerCase()}" style="border:none; background:#f2f2f5; color:#6e6e73; border-radius:8px; padding:3px 9px; cursor:pointer; font-size:12px; flex-shrink:0;">\u29c9</button>` : ''}
       </div>`;
-    return `<div class="row" style="align-items:flex-start; padding:13px 0 13px 8px; border-bottom:1px solid #f0f0f3; ${contacted ? 'background:#fafdfb; border-radius:10px;' : ''}">
-      <input type="checkbox" data-tick="${i.id}" title="Fully done — plan set up or closed" style="width:20px; height:20px; margin-top:2px;">
+    const textRow = (label, val, red) => !val ? '' : `
+      <div style="padding:3px 0; font-size:12.5px;"><span class="muted" style="min-width:74px; display:inline-block;">${label}</span> <strong style="${red ? 'color:#c0392b;' : ''}">${esc(val)}</strong></div>`;
+
+    const stepHtml = (s) => {
+      const ticked = isDone(s.id);
+      const chips = s.chips && ticked ? `
+        <div style="display:flex; gap:6px; margin:4px 0 2px 26px;">
+          ${s.chips.map(c => `<button data-dcchip="${i.id}|${c}" style="border:none; cursor:pointer; border-radius:99px; padding:3px 11px; font-size:11.5px; font-weight:600; background:${i.dcDepositMethod === c ? '#0E7C7B22' : '#f2f2f5'}; color:${i.dcDepositMethod === c ? '#0E7C7B' : '#6e6e73'};">${c}</button>`).join('')}
+        </div>` : '';
+      return `
+      <div style="padding:4px 0;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px;">
+          <input type="checkbox" data-dcstep="${i.id}|${s.id}" ${ticked ? 'checked' : ''} style="width:16px; height:16px;">
+          <span style="${ticked ? 'color:#8e8e93; text-decoration:line-through;' : 'font-weight:600;'}">${s.label}</span>
+          <button data-dcinfo="${i.id}|${s.id}" title="Full instructions" style="border:none; background:none; color:#3478f6; cursor:pointer; font-size:13px; padding:0 4px;">\u24d8</button>
+        </label>
+        <div id="dcinfo-${i.id}-${s.id}" hidden style="margin:3px 0 4px 26px; font-size:12px; color:#5f6368; background:#f6f8fa; border-radius:8px; padding:6px 10px;">${s.info}</div>
+        ${chips}
+      </div>`;
+    };
+
+    return `<div class="row" style="align-items:flex-start; padding:13px 0 13px 8px; border-bottom:1px solid #f0f0f3; ${allDone ? 'background:#f2faf4; border-radius:10px;' : ''}">
+      <input type="checkbox" data-tick="${i.id}" title="Fully done - plan set up (or closed)" style="width:20px; height:20px; margin-top:2px;">
       <div style="flex:1;">
-        <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong> <span style="color:#3c3c43;">— Denticare application</span>
-          ${contacted ? `<span class="chip" style="background:#e6f4ec; color:#1d7a46;">contacted${i.contactedAt ? ' ' + new Date(i.contactedAt).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' }) : ''}</span>` : ''}
+        <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong> <span style="color:#3c3c43;">\u2014 Denticare application</span>
+          <span class="chip" style="background:${allDone ? '#1d7a4622' : '#f2f2f5'}; color:${allDone ? '#1d7a46' : '#6e6e73'}; font-weight:700;">${done.length}/${DC_STEPS.length}</span>
+          ${i.employed === 'No' ? `<span class="chip" style="background:#fdecea; color:#c0392b;">\u2717 not employed</span>` : ''}
+          ${allDone ? `<span style="color:#1d7a46; font-size:12px; font-weight:700;">All steps done \u2014 tick to complete</span>` : ''}
           ${vwChip(i)}</div>
-        <div class="muted" style="margin-top:3px; ${stale ? 'color:#9a6b00;font-weight:600;' : ''}">applied ${actionAge(i.createdAt)}${i.amount ? ' · ' + esc(i.amount) : ''}${i.hadPlan ? ' · plan quoted: ' + esc(i.hadPlan) : ''}${i.preferredContact ? ' · prefers ' + esc(i.preferredContact) : ''}</div>
-        <div style="margin-top:6px; background:#f8fafc; border:1px solid #eef1f3; border-radius:10px; padding:7px 11px; max-width:520px;">
+        <div class="muted" style="margin-top:3px; ${stale ? 'color:#9a6b00;font-weight:600;' : ''}">applied ${actionAge(i.createdAt)}${i.amount ? ' \u00b7 ' + esc(i.amount) : ''}</div>
+        <div class="row" style="margin-top:7px;">
+          <button data-dcpanel="${i.id}|d" class="secondary" style="font-size:12px; padding:5px 13px; ${openD ? 'background:#e8f0fe; color:#1a56b8;' : ''}">Details ${openD ? '\u25be' : '\u25b8'}</button>
+          <button data-dcpanel="${i.id}|s" class="secondary" style="font-size:12px; padding:5px 13px; ${openS ? 'background:#e6f4ec; color:#1d7a46;' : ''}">To finish ${openS ? '\u25be' : '\u25b8'}</button>
+          <button class="secondary" data-del="${i.id}" title="Delete completely (spam only - tick the round box for real applications)" style="padding:6px 12px; margin-left:auto;">\u2715</button>
+        </div>
+        <div ${openD ? '' : 'hidden'} style="margin-top:7px; background:#f8fafc; border:1px solid #eef1f3; border-radius:10px; padding:8px 12px; max-width:560px;">
           ${fieldRow('Phone', i.mobile, 'mobile')}
           ${fieldRow('Email', i.email, 'email')}
+          ${textRow('Amount', i.amount)}
+          ${textRow('Citizen', i.citizen)}
+          ${textRow('Employed', i.employed ? i.employed + (i.employed === 'No' ? ' \u2014 Denticare deems the responsible party ineligible if not employed' : '') : '', i.employed === 'No')}
+          ${textRow('Frequency', i.frequency)}
+          ${textRow('Start date', i.startDate)}
+          ${textRow('Own acct', i.ownAccount)}
+          ${i.rpName || i.rpPhone ? `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed #dfe4e8;"><div class="muted" style="font-size:11.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; padding-bottom:2px;">Responsible party${i.rpTitle ? ' \u00b7 ' + esc(i.rpTitle) : ''}</div>
+            ${fieldRow('Name', i.rpName, 'rpName')}
+            ${fieldRow('Phone', i.rpPhone, 'rpPhone')}
+            ${fieldRow('DOB', i.rpDob, 'rpDob')}
+          </div>` : ''}
           ${fieldRow('Message', i.message, 'message')}
+          <div class="row" style="margin-top:7px; padding-top:7px; border-top:1px solid #eef1f3;">
+            <button data-dccopyall="${i.id}" class="secondary" style="font-size:12px; padding:5px 12px;">\u29c9 Copy all</button>
+            <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note\u2026" style="flex:1; max-width:220px; font-size:12px; padding:6px 10px;">
+          </div>
         </div>
-        <div class="row" style="margin-top:8px;">
-          <button data-dccontact="${i.id}" style="border:none; cursor:pointer; border-radius:99px; padding:5px 13px; font-size:12px; font-weight:600; background:${contacted ? '#1d7a4622' : '#f2f2f5'}; color:${contacted ? '#1d7a46' : '#6e6e73'};">${contacted ? '✓ Contacted' : 'Contacted'}</button>
-          <button data-dccopyall="${i.id}" class="secondary" style="font-size:12px; padding:5px 12px;">⧉ Copy all</button>
-          <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:150px; font-size:12px; padding:6px 10px;">
-          <button class="secondary" data-del="${i.id}" title="Delete completely (spam only — tick Done for real applications)" style="padding:6px 12px;">✕</button>
+        <div ${openS ? '' : 'hidden'} style="margin-top:7px; background:#fbfdfb; border:1px solid #e3ede5; border-radius:10px; padding:8px 12px; max-width:560px;">
+          ${DC_STEPS.filter(s => !s.phase2).map(stepHtml).join('')}
+          <div style="margin:7px 0 3px; font-size:11.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; color:#8e8e93; border-top:1px dashed #dfe4e8; padding-top:7px;">After the payment schedule arrives from Denticare (email)</div>
+          ${DC_STEPS.filter(s => s.phase2).map(stepHtml).join('')}
+          <div style="margin-top:6px; font-size:11.5px; color:#9a6b00; background:#fdf6e8; border-radius:8px; padding:5px 10px;">Reminder: keep the Principle heading updated as the plan progresses.</div>
         </div>
       </div>
     </div>`;
@@ -1437,7 +1504,51 @@ async function refreshActions(fresh = true) {
     if (how) { e.preventDefault(); window.cdbs.openExternal(how.getAttribute('data-howto')); return; }
     const vwc = e.target.closest('span[data-vwchip]');
     if (vwc) { e.preventDefault(); openViewsEditor(vwc.getAttribute('data-vwchip')); return; }
-    // Denticare: one-tap field copy, Copy all, and the Contacted toggle.
+    // Denticare handlers: panel toggles (local), step ticks + deposit chips
+    // (synced via denticareSteps), field copy, Copy all, (i) expanders.
+    const dcpanel = e.target.closest('button[data-dcpanel]');
+    if (dcpanel) {
+      const key = dcpanel.getAttribute('data-dcpanel').replace('|', '|');
+      const k = dcpanel.getAttribute('data-dcpanel').split('|');
+      const mapKey = k[0] + '|' + k[1];
+      window.__dcOpen = window.__dcOpen || {};
+      window.__dcOpen[mapKey] = !window.__dcOpen[mapKey];
+      refreshActions();
+      return;
+    }
+    const dcinfo = e.target.closest('button[data-dcinfo]');
+    if (dcinfo) {
+      e.preventDefault();
+      const k = dcinfo.getAttribute('data-dcinfo').split('|');
+      const box = document.getElementById('dcinfo-' + k[0] + '-' + k[1]);
+      if (box) box.hidden = !box.hidden;
+      return;
+    }
+    const dcstep = e.target.closest('input[data-dcstep]');
+    if (dcstep) {
+      const k = dcstep.getAttribute('data-dcstep').split('|');
+      const id = k[0];
+      const ticked = [];
+      document.querySelectorAll('input[data-dcstep^="' + id + '|"]').forEach(cb => {
+        if (cb.checked) ticked.push(cb.getAttribute('data-dcstep').split('|')[1]);
+      });
+      const it = (__items.list || []).find(x => x.id === id);
+      const payload = { id: id, steps: ticked.join(',') };
+      if (it && it.dcDepositMethod) payload.depositMethod = it.dcDepositMethod;
+      const r2 = await window.cdbs.denticareSteps(payload);
+      if (!r2.ok && r2.error) alert(r2.error);
+      refreshActions(true);
+      return;
+    }
+    const dcchip = e.target.closest('button[data-dcchip]');
+    if (dcchip) {
+      const k = dcchip.getAttribute('data-dcchip').split('|');
+      const it = (__items.list || []).find(x => x.id === k[0]);
+      const r2 = await window.cdbs.denticareSteps({ id: k[0], steps: it ? String(it.dcSteps || '') : '', depositMethod: k[1] });
+      if (!r2.ok && r2.error) alert(r2.error);
+      refreshActions(true);
+      return;
+    }
     const dcc = e.target.closest('button[data-dccopy]');
     if (dcc) {
       const parts = dcc.getAttribute('data-dccopy').split('|');
@@ -1446,7 +1557,7 @@ async function refreshActions(fresh = true) {
       if (val) {
         try {
           await navigator.clipboard.writeText(String(val));
-          const t = dcc.textContent; dcc.textContent = '✓';
+          const t = dcc.textContent; dcc.textContent = '\u2713';
           setTimeout(() => { dcc.textContent = t; }, 1600);
         } catch (e2) { /* clipboard blocked - nothing sensible to do */ }
       }
@@ -1457,29 +1568,30 @@ async function refreshActions(fresh = true) {
       const it = (__items.list || []).find(x => x.id === dca.getAttribute('data-dccopyall'));
       if (it) {
         const d = it.createdAt ? new Date(it.createdAt).toLocaleDateString('en-AU') : '';
-        const L = ['Denticare application — ' + d,
+        const L = ['Denticare application \u2014 ' + d,
           'Name: ' + (it.name || ''),
-          'Phone: ' + (it.mobile || '—'),
-          'Email: ' + (it.email || '—'),
-          'Preferred contact: ' + (it.preferredContact || '—'),
-          'Treatment amount: ' + (it.amount || '—'),
-          'Treatment plan with us: ' + (it.hadPlan || '—')];
+          'Phone: ' + (it.mobile || '\u2014'),
+          'Email: ' + (it.email || '\u2014'),
+          'Total amount applying for (incl 20% deposit): ' + (it.amount || '\u2014'),
+          'Australian citizen: ' + (it.citizen || '\u2014'),
+          'Employed: ' + (it.employed || '\u2014'),
+          'Payment frequency: ' + (it.frequency || '\u2014'),
+          'Start date: ' + (it.startDate || '\u2014'),
+          'Own account: ' + (it.ownAccount || '\u2014')];
+        if (it.rpName || it.rpPhone) {
+          L.push('Responsible party: ' + [(it.rpTitle || ''), (it.rpName || '')].join(' ').trim());
+          L.push('Responsible party phone: ' + (it.rpPhone || '\u2014'));
+          L.push('Responsible party DOB: ' + (it.rpDob || '\u2014'));
+        }
+        if (it.dcDepositMethod) L.push('Deposit taken: ' + it.dcDepositMethod);
         if (it.message) L.push('Message: ' + it.message);
         if (it.noteText) L.push('Note: ' + it.noteText);
         try {
           await navigator.clipboard.writeText(L.join('\n'));
-          const t = dca.textContent; dca.textContent = '✓ Copied';
+          const t = dca.textContent; dca.textContent = '\u2713 Copied';
           setTimeout(() => { dca.textContent = t; }, 1600);
         } catch (e2) { /* clipboard blocked */ }
       }
-      return;
-    }
-    const dct = e.target.closest('button[data-dccontact]');
-    if (dct) {
-      dct.disabled = true;
-      const r2 = await window.cdbs.denticareContacted({ id: dct.getAttribute('data-dccontact') });
-      if (!r2.ok && r2.error) alert(r2.error);
-      refreshActions(true);
       return;
     }
     const del = e.target.closest('button[data-del]');
