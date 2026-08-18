@@ -1414,7 +1414,15 @@ async function refreshActions(fresh = true) {
     const needsDent = items.filter(i => (i.kind === 'checkout' || i.kind === 'recall') && !i.stageDentist).length;
     const overdueN = items.filter(i => i.kind === 'unpaid' && i.escalated).length;
     const isOpen = window.__secCollapsed[s] === undefined ? (s === 'Urgent') : !window.__secCollapsed[s];   // clean by default; Urgent demands eyes
-    return `<details class="dept" data-sec="${esc(s)}" ${isOpen ? 'open' : ''} style="margin-top:6px;">
+    // ---- Reception/Dentists divider: sits above the first visible dentist
+    // section, only when reception sections are also on screen, so pure
+    // dentist views stay clean and the line never dangles above nothing.
+    const DENT_SECS = ['Rebook (dentist check)', 'No 6/12 rebooked'];
+    const firstDent = sections.find(x => DENT_SECS.includes(x));
+    const recDivider = (s === firstDent && sections.some(x => !DENT_SECS.includes(x)))
+      ? `<div style="display:flex; align-items:center; gap:10px; margin:20px 0 2px;"><span style="flex:1; height:1px; background:#d9d9de;"></span><span style="font-size:11px; font-weight:700; letter-spacing:1.5px; color:#8e8e93; text-transform:uppercase;">Dentists</span><span style="flex:1; height:1px; background:#d9d9de;"></span></div>`
+      : '';
+    return recDivider + `<details class="dept" data-sec="${esc(s)}" ${isOpen ? 'open' : ''} style="margin-top:6px;">
       <summary style="font-size:17px; font-weight:700; letter-spacing:-.2px; padding:12px 0;">
         <span class="ci" style="display:inline-block; width:18px; color:#8e8e93; font-weight:600;"></span>${s}
         <span class="chip" style="background:${items.length ? '#fdecec' : '#e6f4ec'}; color:${items.length ? '#c0392b' : '#1d7a46'}; font-size:12px; margin-left:8px;">${items.length}</span>
