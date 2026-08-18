@@ -1195,7 +1195,7 @@ async function refreshActions(fresh = true) {
     const halfDone = twoStage && (i.stageDentist || i.stageReception);
     const ovd = i.kind === 'unpaid' && i.escalated && !i.doneAt;
     return `<div class="row" style="align-items:flex-start; padding:13px 0 13px 8px; border-bottom:1px solid #f0f0f3; ${halfDone ? 'background:#fafdfb; border-radius:10px;' : ''}${ovd ? 'background:#fdf5f5; border-left:3px solid #c0392b; border-radius:10px;' : ''}">
-      ${twoStage ? stagePills(i) : (i.kind === 'rebook' ? '' : `<input type="checkbox" data-tick="${i.id}" style="width:20px; height:20px; margin-top:2px;">`)}
+      ${twoStage ? stagePills(i) : (i.kind === 'rebook' || i.kind === 'unpaid' ? '' : `<input type="checkbox" data-tick="${i.id}" style="width:20px; height:20px; margin-top:2px;">`)}
       <div style="flex:1;">
         <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong>${i.text ? ' <span style="color:#3c3c43;">— ' + esc(i.text) + '</span>' : ''}
           ${i.assignee ? `<span class="chip">${esc(i.assignee)}</span>` : ''}
@@ -1207,11 +1207,11 @@ async function refreshActions(fresh = true) {
         <div class="muted" style="margin-top:3px;">${esc(i.context || '')}${i.context ? ' · ' : ''}${i.owedTotal ? `<span style="color:#c0392b; font-weight:700;">owes $${esc(i.owedTotal)} in total</span> · ` : ''}${when}</div>
       </div>
       <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
-      ${i.kind === 'unpaid' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${PEND_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : i.kind === 'rebook' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${REBOOK_PARK_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : ''}
+      ${i.kind === 'unpaid' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${PEND_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}<option value="__done">Done</option></select>` : i.kind === 'rebook' ? `<select data-park="${i.id}" style="font:inherit; font-size:11px; border:1px solid #d2d2d7; border-radius:8px; padding:5px;"><option value="">Park as… ▾</option>${REBOOK_PARK_LABELS.map(L => `<option>${esc(L)}</option>`).join('')}</select>` : ''}
       ${i.patientId && !/^(name:|recall:|appt:)/.test(String(i.patientId))
         ? `<button class="secondary engbtn" data-pinp="${i.id}" title="Write this note into their Principle file and pin it" style="font-size:11px; padding:5px 10px;">→ Principle</button>`
         : `<button class="secondary" disabled title="No Principle patient link on this item" style="font-size:11px; padding:5px 10px; opacity:.4;">→ Principle</button>`}
-      ${i.kind === 'rebook' ? '' : `<button class="secondary" data-del="${i.id}" title="Delete completely" style="padding:6px 12px;">✕</button>`}
+      ${i.kind === 'rebook' || i.kind === 'unpaid' ? '' : `<button class="secondary" data-del="${i.id}" title="Delete completely" style="padding:6px 12px;">✕</button>`}
     </div>`;
   };
 
@@ -1426,8 +1426,14 @@ async function refreshActions(fresh = true) {
       refreshActions();
     } else if (t.matches('select[data-park]')) {
       const label = t.value;
-      if (label) {
-        await window.cdbs.actionPark({ id: t.getAttribute('data-park'), label });
+      const pkId = t.getAttribute('data-park');
+      if (label === '__done') {
+        const pkNote = document.querySelector(`input[data-note="${pkId}"]`);
+        t.disabled = true; const pkRow = t.closest('.row'); if (pkRow) pkRow.style.opacity = '0.45';
+        await window.cdbs.actionTick({ id: pkId, note: pkNote ? pkNote.value : '' });
+        refreshActions(true);
+      } else if (label) {
+        await window.cdbs.actionPark({ id: pkId, label });
         refreshActions(true);
       }
     } else if (t.matches('input[data-note]')) {
