@@ -1297,6 +1297,7 @@ async function refreshActions(fresh = true) {
               </div>
               <input type="text" data-note="${i.id}" value="${esc(i.noteText || '')}" placeholder="note…" style="width:140px; font-size:12px; padding:6px 10px;">
               <button class="secondary" data-unpark="${i.id}" style="font-size:11px; padding:5px 11px;">↩ Return to list</button>
+              <button class="secondary" data-del="${i.id}" title="Delete completely" style="font-size:11px; padding:5px 11px;">✕</button>
             </div>`;
           }).join('') || '<div class="muted" style="padding:8px;">None here.</div>')
       : '';
