@@ -1648,6 +1648,31 @@ async function refreshActions(fresh = true) {
 refreshActions();
 window.cdbs.onActionsChanged(() => refreshActions());
 
+// ---------- Gentle auto-refresh ----------
+// Website-born items (Denticare applications) land in the cloud with no
+// local trigger, so the Home list quietly re-pulls every 3 minutes.
+// Skipped when the window is hidden (idle machines stay silent) and
+// during quiet hours 7:30pm-6:30am when nobody is submitting forms.
+// The typingInside guard in refreshActions already protects half-written
+// notes, and section/panel open state survives repaints.
+function quietHoursNow() {
+  const d = new Date();
+  const mins = d.getHours() * 60 + d.getMinutes();
+  return mins >= (19 * 60 + 30) || mins < (6 * 60 + 30);   // 7:30pm .. 6:30am
+}
+setInterval(() => {
+  if (document.hidden) return;
+  if (quietHoursNow()) return;
+  refreshActions(true);
+}, 3 * 60 * 1000);
+
+// Manual pull for "the application just came in - show me now".
+$('btnListRefresh').addEventListener('click', async () => {
+  const b = $('btnListRefresh');
+  b.disabled = true; const was = b.innerHTML; b.textContent = 'Refreshing\u2026';
+  try { await refreshActions(true); } finally { b.disabled = false; b.innerHTML = was; }
+});
+
 // ---------- Share the Action list page ----------
 $('btnShareCopy').addEventListener('click', async () => {
   const html = await window.cdbs.shareHtmlGet();
