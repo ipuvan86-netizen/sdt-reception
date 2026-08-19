@@ -1248,6 +1248,7 @@ async function refreshActions(fresh = true) {
         <div style="font-size:14.5px;"><strong>${esc(i.name)}</strong> <span style="color:#3c3c43;">\u2014 Denticare application</span>
           <span class="chip" style="background:${allDone ? '#1d7a4622' : '#f2f2f5'}; color:${allDone ? '#1d7a46' : '#6e6e73'}; font-weight:700;">${done.length}/${DC_STEPS.length}</span>
           ${i.employed === 'No' ? `<span class="chip" style="background:#fdecea; color:#c0392b;">\u2717 not employed</span>` : ''}
+          ${i.smsSentAt ? `<span class="chip" style="background:#e6f4ec; color:#1d7a46;" title="The website texted the patient a confirmation when they applied">\u2713 confirmation texted</span>` : ''}
           ${allDone ? `<span style="color:#1d7a46; font-size:12px; font-weight:700;">All steps done \u2014 tick to complete</span>` : ''}
           ${vwChip(i)}</div>
         <div class="muted" style="margin-top:3px; ${stale ? 'color:#9a6b00;font-weight:600;' : ''}">applied ${actionAge(i.createdAt)}${i.amount ? ' \u00b7 ' + esc(i.amount) : ''}</div>
