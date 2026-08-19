@@ -3552,7 +3552,7 @@ function fsDelete(id) {
 // (create-only write fails if the day is already claimed).
 const FS_ROOT = 'https://firestore.googleapis.com/v1/projects/' + FB_PROJECT + '/databases/(default)/documents';
 const MACHINE = (() => { try { return require('os').hostname(); } catch (e) { return 'this-pc'; } })();
-const APP_BUILD = '2026-08-19.1';
+const APP_BUILD = '2026-08-19.2';
 
 // ---------------------------------------------------------------------
 // LIVE DEBUG FEED: today's journal + runlogs, patient names reduced to
@@ -4675,7 +4675,7 @@ function loadAutoJobs() {
     s.jobs.push({
       id: 'checkout',
       name: 'Incomplete checkouts',
-      desc: 'Appointments from the last 7 days that were never fully checked out. Each needs the dentist to check out their part, then reception to complete theirs - two ticks per item, auto-assigned to the practitioner.',
+      desc: 'Appointments on the Principle checkout report (saved range: 90 days) that were never fully checked out. Each needs the dentist to check out their part, then reception to complete theirs - two ticks per item, auto-assigned to the practitioner. Items clear themselves once the patient is checked out in Principle and drops off the report.',
       url: 'https://app.principle.dental/reporting/custom-reports/DiwPeXCCZhVufRARmgwl',
       days: [1, 2, 3, 4, 5],
       time: '08:40',
@@ -4683,6 +4683,9 @@ function loadAutoJobs() {
       lastRun: null,
     });
   }
+  // desc refresh: existing machines carry the old saved wording; keep the
+  // checkout job's description in step with the report's real 90-day range.
+  { const cj = s.jobs.find(j => j.id === 'checkout'); if (cj && /last 7 days/.test(cj.desc || '')) cj.desc = 'Appointments on the Principle checkout report (saved range: 90 days) that were never fully checked out. Each needs the dentist to check out their part, then reception to complete theirs - two ticks per item, auto-assigned to the practitioner. Items clear themselves once the patient is checked out in Principle and drops off the report.'; }
   if (!s.jobs.find(j => j.id === 'reception-attn')) {
     s.jobs.push({
       id: 'reception-attn',
@@ -5423,7 +5426,7 @@ async function runCheckoutJob(job) {
   }
   // ---- auto-clear (report succeeded, so it can vouch for its window) ----
   // A checkout card whose appointment sits inside the report's saved
-  // 30-day range (2-day safety margin -> 28) but whose token is no longer
+  // 90-day range (2-day safety margin -> 88) but whose token is no longer
   // among today's rows means the checkout has since been completed in
   // Principle. Tick it off automatically, with an audit note. Cards older
   // than the window can't be judged by this report and are left alone.
@@ -5441,7 +5444,7 @@ async function runCheckoutJob(job) {
     const apptD = parseReportDate(String(it.context || '').replace(/^appt\s+/, ''));
     if (!apptD) continue;                                        // unreadable date - a human decides
     const ageDays = Math.floor((Date.now() - apptD.getTime()) / 86400000);
-    if (ageDays < 0 || ageDays > 28) continue;                   // outside the report window - can't verify
+    if (ageDays < 0 || ageDays > 88) continue;                   // outside the report window (90d saved range, 2-day margin) - can't verify
     if (seenTokens.has(it.token)) continue;                      // still on the report - genuinely open
     it.doneAt = now; it.doneNote = 'auto-cleared: no longer on the Principle checkout report'; it.auto = true;
     await fsPush(it);
