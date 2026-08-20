@@ -1079,6 +1079,19 @@ const PEND_LABELS = ['Denticare current', 'CDBS pending', 'DVA pending', 'Gov vo
 const REBOOK_PARK_LABELS = ['Treatment coordinator', 'No followup'];
 function pendDays(i) { return i.parkedAt ? Math.floor((Date.now() - Date.parse(i.parkedAt)) / 86400000) : 0; }
 
+// The nine Denticare set-up steps. Module scope so the tick handler can
+// warn about outstanding steps, not just the row renderer.
+const DC_STEPS = [
+  { id: 's1', label: 'Amounts match', info: 'Check the total amount on this application is exactly the same as the treatment plan amount in Principle.' },
+  { id: 's2', label: 'Plan heading', info: 'In Principle, update the treatment plan heading to: Denticare \u2013 Pending' },
+  { id: 's3', label: 'Denticare portal', info: 'Create the plan in the Denticare portal. (How-to guide coming soon.)' },
+  { id: 's4', label: 'Deposit invoice', info: 'Create an invoice for the deposit.' },
+  { id: 's5', label: 'Deposit taken', info: 'Take the deposit, then pick how it was taken below. (Medipass / Tyro Health how-to coming soon.)', chips: ['Phone', 'Medipass', 'In person'] },
+  { id: 's6', label: 'Upload documents', info: 'Upload the Denticare schedule AND the corresponding treatment plan from Principle as PDF.', phase2: true },
+  { id: 's7', label: 'Totals reconcile', info: 'Confirm the total matches: Denticare scheduled amount + deposit = total plan amount.', phase2: true },
+  { id: 's8', label: 'Approve status', info: 'Update the Principle treatment plan status to: Denticare Plan Approved \u2013 $[total amount]', phase2: true },
+  { id: 's9', label: 'Patient tag', info: 'Add the patient tag: Denticare current', phase2: true },
+];
 async function refreshActions(fresh = true) {
   const all0 = (await getItems(fresh)).filter(i => i.kind !== 'reactivation' && i.kind !== 'reactcdbs' && i.kind !== 'reactrecall');   // reactivation lives on its own screens
   if (typingInside($('actionItems'))) return;   // never eat a half-written note
@@ -1097,6 +1110,8 @@ async function refreshActions(fresh = true) {
   if (!window.__vRestored) { window.__vRestored = true; try { window.__vWant = localStorage.getItem('sdtViewSel') || ''; } catch (e) { window.__vWant = ''; } }
   let filt = $('fAssign').value || window.__vWant || ''; window.__vWant = '';
   const all = (a.items || []).filter(i => i.id !== '_viewsConfig' && i.kind !== 'viewscfg');
+  window.__dcById = {};
+  for (const i of all) { if (i.kind === 'denticare') window.__dcById[i.id] = i; }
   const namesAll = [...new Set(all.map(i => i.assignee).filter(Boolean))].sort();
   window.__vNames = namesAll;
   window.__vSecs = (() => {
@@ -1195,17 +1210,6 @@ async function refreshActions(fresh = true) {
   //               chips under step 5, and a pinned heading reminder.
   // All 9 ticked => green "tick to complete" state; the tick box stays the
   // only way to mark the item fully done (never automatic).
-  const DC_STEPS = [
-    { id: 's1', label: 'Amounts match', info: 'Check the total amount on this application is exactly the same as the treatment plan amount in Principle.' },
-    { id: 's2', label: 'Plan heading', info: 'In Principle, update the treatment plan heading to: Denticare \u2013 Pending' },
-    { id: 's3', label: 'Denticare portal', info: 'Create the plan in the Denticare portal. (How-to guide coming soon.)' },
-    { id: 's4', label: 'Deposit invoice', info: 'Create an invoice for the deposit.' },
-    { id: 's5', label: 'Deposit taken', info: 'Take the deposit, then pick how it was taken below. (Medipass / Tyro Health how-to coming soon.)', chips: ['Phone', 'Medipass', 'In person'] },
-    { id: 's6', label: 'Upload documents', info: 'Upload the Denticare schedule AND the corresponding treatment plan from Principle as PDF.', phase2: true },
-    { id: 's7', label: 'Totals reconcile', info: 'Confirm the total matches: Denticare scheduled amount + deposit = total plan amount.', phase2: true },
-    { id: 's8', label: 'Approve status', info: 'Update the Principle treatment plan status to: Denticare Plan Approved \u2013 $[total amount]', phase2: true },
-    { id: 's9', label: 'Patient tag', info: 'Add the patient tag: Denticare current', phase2: true },
-  ];
   window.__dcOpen = window.__dcOpen || {};
   const denticareRowHtml = (i) => {
     const done = String(i.dcSteps || '').split(',').filter(Boolean);
@@ -1620,10 +1624,26 @@ async function refreshActions(fresh = true) {
       refreshActions();
     } else if (t.matches('input[data-tick]')) {
       const id = t.getAttribute('data-tick');
+      // Denticare guard: completing an application with steps outstanding asks
+      // first and records how far it got in the done-note. Deliberately NOT a
+      // block - declined, cancelled and duplicate applications are closed
+      // early on purpose. Unticking (undo) never prompts.
+      let dcSuffix = '';
+      const dcIt = t.checked ? (window.__dcById || {})[id] : null;
+      if (dcIt) {
+        const dcDone = String(dcIt.dcSteps || '').split(',').filter(Boolean);
+        const dcMiss = DC_STEPS.filter(s => dcDone.indexOf(s.id) === -1);
+        if (dcMiss.length) {
+          const ok = confirm('Still not ticked: ' + dcMiss.map(s => s.label).join(', ')
+            + '\n\nComplete this Denticare application anyway? (' + dcDone.length + '/' + DC_STEPS.length + ' steps done)');
+          if (!ok) { t.checked = false; return; }
+          dcSuffix = ' \u2014 completed at ' + dcDone.length + '/' + DC_STEPS.length + ' steps';
+        }
+      }
       t.disabled = true;                                     // instant feedback
       const row = t.closest('.row') || t.closest('div'); if (row) row.style.opacity = '0.45';
       const noteEl = document.querySelector(`input[data-note="${id}"]`);
-      await window.cdbs.actionTick({ id, note: noteEl ? noteEl.value : '' });
+      await window.cdbs.actionTick({ id, note: ((noteEl ? noteEl.value : '') + dcSuffix).slice(0, 200) });
       refreshActions();
     } else if (t.matches('select[data-park]')) {
       const label = t.value;
